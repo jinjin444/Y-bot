@@ -1,4 +1,3 @@
-# MongoDB Database - Full Safe Storage
 import os
 import datetime
 import random
@@ -7,7 +6,7 @@ import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # MongoDB Connection
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://Tyr6hij:gufutihhh@cluster0.hdfqxfu.mongodb.net/?appName=Cluster0")
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://Tyr6hij")
 USE_MONGODB = os.environ.get("USE_MONGODB", "false").lower() == "true"
 
 # MongoDB Client
@@ -150,9 +149,41 @@ async def is_banned_user(user_id):
             return data["users"].get(str(user_id), {}).get("banned", False)
     return False
 
+# ============ get_user_info (added for /info) ============
+async def get_user_info(user_id):
+    """Return full user info dict (plan, expiry, banned, used_codes)."""
+    if USE_MONGODB and MONGODB_URI:
+        db = await get_mongo_db()
+        if db:
+            user = await db.users.find_one({"_id": str(user_id)})
+            if user:
+                return {
+                    "plan": user.get("plan", "Bronze"),
+                    "expiry": user.get("expiry"),
+                    "banned": user.get("banned", False),
+                    "used_codes": user.get("used_codes", [])
+                }
+            else:
+                return {"plan": "Bronze", "expiry": None, "banned": False, "used_codes": []}
+    # JSON fallback
+    import json
+    import os
+    DB_FILE = "razor_bot_data.json"
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+            user = data["users"].get(str(user_id), {})
+            return {
+                "plan": user.get("plan", "Bronze"),
+                "expiry": user.get("expiry"),
+                "banned": user.get("banned", False),
+                "used_codes": user.get("used_codes", [])
+            }
+    return {"plan": "Bronze", "expiry": None, "banned": False, "used_codes": []}
+
 # ============ CARD FUNCTIONS ============
 
-async def save_card_to_db(card, status, response, gateway, price):
+async def save_card_to_db(card, status, response, gateway, price, user_id=None):
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
@@ -162,6 +193,7 @@ async def save_card_to_db(card, status, response, gateway, price):
                 "response": response,
                 "gateway": gateway,
                 "price": price,
+                "user_id": str(user_id) if user_id else None,
                 "created_at": datetime.datetime.now().isoformat()
             })
             return
@@ -183,7 +215,9 @@ async def save_card_to_db(card, status, response, gateway, price):
     db = load_db()
     db["cards"].append({
         "card": card, "status": status, "response": response,
-        "gateway": gateway, "price": price, "created_at": datetime.datetime.now().isoformat()
+        "gateway": gateway, "price": price,
+        "user_id": str(user_id) if user_id else None,
+        "created_at": datetime.datetime.now().isoformat()
     })
     save_db(db)
 
@@ -231,6 +265,71 @@ async def get_approved_count():
             data = json.load(f)
             return sum(1 for c in data["cards"] if c.get("status") == "APPROVED")
     return 0
+
+async def get_user_hits(user_id, status_filter=None, limit=None):
+    """Get hit cards for a specific user."""
+    results = []
+    if USE_MONGODB and MONGODB_URI:
+        db = await get_mongo_db()
+        if db:
+            query = {"user_id": str(user_id)}
+            if status_filter:
+                query["status"] = status_filter.upper()
+            else:
+                query["status"] = {"$in": ["CHARGED", "APPROVED"]}
+            cursor = db.cards.find(query).sort("created_at", -1)
+            if limit:
+                cursor = cursor.limit(limit)
+            async for doc in cursor:
+                results.append(doc)
+            return results
+    import json, os
+    DB_FILE = "razor_bot_data.json"
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+        for c in reversed(data.get("cards", [])):
+            if c.get("user_id") == str(user_id):
+                st = c.get("status", "").upper()
+                if status_filter:
+                    if st == status_filter.upper(): results.append(c)
+                else:
+                    if st in ["CHARGED", "APPROVED"]: results.append(c)
+            if limit and len(results) >= limit: break
+    return results
+
+
+async def get_all_hits(status_filter=None, limit=None):
+    """Get all hit cards across all users. Admin use only."""
+    results = []
+    if USE_MONGODB and MONGODB_URI:
+        db = await get_mongo_db()
+        if db:
+            query = {}
+            if status_filter:
+                query["status"] = status_filter.upper()
+            else:
+                query["status"] = {"$in": ["CHARGED", "APPROVED"]}
+            cursor = db.cards.find(query).sort("created_at", -1)
+            if limit:
+                cursor = cursor.limit(limit)
+            async for doc in cursor:
+                results.append(doc)
+            return results
+    import json, os
+    DB_FILE = "razor_bot_data.json"
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+        for c in reversed(data.get("cards", [])):
+            st = c.get("status", "").upper()
+            if status_filter:
+                if st == status_filter.upper(): results.append(c)
+            else:
+                if st in ["CHARGED", "APPROVED"]: results.append(c)
+            if limit and len(results) >= limit: break
+    return results
+
 
 # ============ PROXY FUNCTIONS ============
 
@@ -368,106 +467,151 @@ async def clear_all_proxies(user_id):
             json.dump(data, f, indent=2, default=str)
     return count
 
-# ============ SITE FUNCTIONS ============
+# ============ GLOBAL SITE FUNCTIONS ============
 
-async def add_site_db(user_id, site, gateway="Unknown", price="0"):
+async def add_global_site(site, gateway="Shopify", price="0"):
+    """Add a site to the global pool (admin only)."""
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
-            await db.sites.update_one(
-                {"_id": str(user_id)},
+            await db.globalsites.update_one(
+                {"_id": "global"},
                 {"$set": {f"sites.{site}": {"gateway": gateway, "price": price}}},
                 upsert=True
+            )
+            return True
+    
+    # JSON fallback
+    import json
+    import os
+    DB_FILE = "razor_bot_data.json"
+    def load_db():
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        return {"users": {}, "cards": [], "proxies": {}, "sites": {}, "plan_codes": {}, "global_sites": {}}
+    def save_db(data):
+        with open(DB_FILE, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+    db = load_db()
+    if "global_sites" not in db:
+        db["global_sites"] = {}
+    db["global_sites"][site] = {"gateway": gateway, "price": price}
+    save_db(db)
+    return True
+
+async def get_global_sites():
+    """Return list of global site domains."""
+    if USE_MONGODB and MONGODB_URI:
+        db = await get_mongo_db()
+        if db:
+            doc = await db.globalsites.find_one({"_id": "global"})
+            if doc and "sites" in doc:
+                return list(doc["sites"].keys())
+            return []
+    
+    import json
+    import os
+    DB_FILE = "razor_bot_data.json"
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+            return list(data.get("global_sites", {}).keys())
+    return []
+
+async def remove_global_site(site):
+    if USE_MONGODB and MONGODB_URI:
+        db = await get_mongo_db()
+        if db:
+            await db.globalsites.update_one(
+                {"_id": "global"},
+                {"$unset": {f"sites.{site}": ""}}
             )
             return True
     
     import json
     import os
     DB_FILE = "razor_bot_data.json"
-    
     def load_db():
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "r") as f:
                 return json.load(f)
-        return {"users": {}, "cards": [], "proxies": {}, "sites": {}, "plan_codes": {}}
-    
+        return {"users": {}, "cards": [], "proxies": {}, "sites": {}, "plan_codes": {}, "global_sites": {}}
     def save_db(data):
         with open(DB_FILE, "w") as f:
             json.dump(data, f, indent=2, default=str)
-    
     db = load_db()
-    if str(user_id) not in db["sites"]:
-        db["sites"][str(user_id)] = {}
-    db["sites"][str(user_id)][site] = {"gateway": gateway, "price": price}
-    save_db(db)
-    return True
+    if site in db.get("global_sites", {}):
+        del db["global_sites"][site]
+        save_db(db)
+        return True
+    return False
 
-async def get_user_sites(user_id):
+async def clear_global_sites():
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
-            user_sites = await db.sites.find_one({"_id": str(user_id)})
-            if user_sites and "sites" in user_sites:
-                return list(user_sites["sites"].keys())
-            return []
+            await db.globalsites.update_one(
+                {"_id": "global"},
+                {"$set": {"sites": {}}}
+            )
+            return True
     
     import json
     import os
     DB_FILE = "razor_bot_data.json"
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            sites_dict = data["sites"].get(str(user_id), {})
-            return list(sites_dict.keys())
-    return []
+    def load_db():
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        return {"users": {}, "cards": [], "proxies": {}, "sites": {}, "plan_codes": {}, "global_sites": {}}
+    def save_db(data):
+        with open(DB_FILE, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+    db = load_db()
+    db["global_sites"] = {}
+    save_db(db)
+    return True
+
+# ============ PER-USER SITE FUNCTIONS (redirect to global) ============
+
+async def add_site_db(user_id, site, gateway="Unknown", price="0"):
+    return await add_global_site(site, gateway, price)
+
+async def get_user_sites(user_id):
+    return await get_global_sites()
 
 async def get_user_sites_with_info(user_id):
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
-            user_sites = await db.sites.find_one({"_id": str(user_id)})
-            if user_sites and "sites" in user_sites:
+            doc = await db.globalsites.find_one({"_id": "global"})
+            if doc and "sites" in doc:
                 result = []
-                for site, info in user_sites["sites"].items():
-                    if isinstance(info, dict):
-                        result.append({
-                            "site": site,
-                            "gateway": info.get("gateway", "Unknown"),
-                            "price": info.get("price", "0")
-                        })
-                    else:
-                        result.append({
-                            "site": site,
-                            "gateway": "Unknown",
-                            "price": "0"
-                        })
+                for site, info in doc["sites"].items():
+                    result.append({
+                        "site": site,
+                        "gateway": info.get("gateway", "Unknown"),
+                        "price": info.get("price", "0")
+                    })
                 return result
             return []
-    
     import json
     import os
     DB_FILE = "razor_bot_data.json"
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
             data = json.load(f)
-            sites_data = data["sites"].get(str(user_id), {})
+            gs = data.get("global_sites", {})
             result = []
-            if isinstance(sites_data, dict):
-                for site, info in sites_data.items():
-                    if isinstance(info, dict):
-                        result.append({
-                            "site": site,
-                            "gateway": info.get("gateway", "Unknown"),
-                            "price": info.get("price", "0")
-                        })
-                    else:
-                        result.append({
-                            "site": site,
-                            "gateway": "Unknown",
-                            "price": "0"
-                        })
-            elif isinstance(sites_data, list):
-                for site in sites_data:
+            for site, info in gs.items():
+                if isinstance(info, dict):
+                    result.append({
+                        "site": site,
+                        "gateway": info.get("gateway", "Unknown"),
+                        "price": info.get("price", "0")
+                    })
+                else:
                     result.append({
                         "site": site,
                         "gateway": "Unknown",
@@ -477,46 +621,17 @@ async def get_user_sites_with_info(user_id):
     return []
 
 async def remove_site_db(user_id, site):
-    if USE_MONGODB and MONGODB_URI:
-        db = await get_mongo_db()
-        if db:
-            await db.sites.update_one(
-                {"_id": str(user_id)},
-                {"$unset": {f"sites.{site}": ""}}
-            )
-            return True
-    
-    import json
-    import os
-    DB_FILE = "razor_bot_data.json"
-    
-    def load_db():
-        if os.path.exists(DB_FILE):
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        return {"users": {}, "cards": [], "proxies": {}, "sites": {}, "plan_codes": {}}
-    
-    def save_db(data):
-        with open(DB_FILE, "w") as f:
-            json.dump(data, f, indent=2, default=str)
-    
-    db = load_db()
-    sites_dict = db["sites"].get(str(user_id), {})
-    if site in sites_dict:
-        del sites_dict[site]
-        save_db(db)
-        return True
-    return False
+    return await remove_global_site(site)
 
 async def update_site_info(user_id, site, gateway, price):
-    return await add_site_db(user_id, site, gateway, price)
+    return await add_global_site(site, gateway, price)
 
 # ============ PLAN CODE FUNCTIONS ============
 
 async def generate_plan_code(plan_key, count=1):
     codes = []
     plan_prefixes = {
-        "plan0": "SHOPIFY_TRIAL",
+        "trial": "SHOPIFY_TRIAL",
         "plan1": "SHOPIFY_CORE",
         "plan2": "SHOPIFY_ELITE",
         "plan3": "SHOPIFY_ROOT",
@@ -585,30 +700,25 @@ async def generate_plan_code(plan_key, count=1):
     return codes
 
 async def redeem_plan_code(user_id, code):
-    """
-    Returns (success, status, plan_key)
-    status: 'success', 'invalid', 'used', 'has_plan'
-    """
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
             code_data = await db.codes.find_one({"_id": code})
             if not code_data:
-                return False, "invalid", None
+                return False, "invalid"
             if code_data.get("used", False):
-                return False, "used", None
+                return False, "used"
             
             plan_key = code_data.get("plan")
-            # Import PLANS dynamically to avoid circular import
             from bot import PLANS
             if plan_key not in PLANS:
-                return False, "invalid", None
-            
-            user_plan = await get_user_plan(user_id)
-            if user_plan != "Bronze":
-                return False, "has_plan", None
+                return False, "invalid"
             
             plan_info = PLANS[plan_key]
+            user_plan = await get_user_plan(user_id)
+            if user_plan != "Bronze":
+                return False, "has_plan"
+            
             expiry = (datetime.datetime.now() + datetime.timedelta(days=plan_info["duration_days"])).isoformat()
             
             await db.users.update_one(
@@ -621,7 +731,7 @@ async def redeem_plan_code(user_id, code):
                 {"$set": {"used": True, "used_by": user_id, "used_at": datetime.datetime.now().isoformat()}}
             )
             
-            return True, "success", plan_key
+            return True, "success"
     
     # JSON fallback
     import json
@@ -640,19 +750,19 @@ async def redeem_plan_code(user_id, code):
     
     db = load_db()
     if code not in db.get("plan_codes", {}):
-        return False, "invalid", None
+        return False, "invalid"
     code_data = db["plan_codes"][code]
     if code_data.get("used", False):
-        return False, "used", None
+        return False, "used"
     
     plan_key = code_data.get("plan")
     from bot import PLANS
     if plan_key not in PLANS:
-        return False, "invalid", None
+        return False, "invalid"
     plan_info = PLANS[plan_key]
     user_plan = await get_user_plan(user_id)
     if user_plan != "Bronze":
-        return False, "has_plan", None
+        return False, "has_plan"
     
     expiry = (datetime.datetime.now() + datetime.timedelta(days=plan_info["duration_days"])).isoformat()
     user = db["users"].get(str(user_id), {})
@@ -665,7 +775,7 @@ async def redeem_plan_code(user_id, code):
         db["users"][str(user_id)]["used_codes"] = []
     db["users"][str(user_id)]["used_codes"].append(code)
     save_db(db)
-    return True, "success", plan_key
+    return True, "success"
 
 def is_valid_code(code):
     import json
@@ -815,93 +925,48 @@ async def get_all_premium_users():
     return []
 
 async def get_total_sites_count():
-    if USE_MONGODB and MONGODB_URI:
-        db = await get_mongo_db()
-        if db:
-            total = 0
-            cursor = db.sites.find({})
-            async for doc in cursor:
-                total += len(doc.get("sites", {}))
-            return total
-    
-    import json
-    import os
-    DB_FILE = "razor_bot_data.json"
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            total = 0
-            for sites_dict in data["sites"].values():
-                total += len(sites_dict)
-            return total
-    return 0
+    sites = await get_global_sites()
+    return len(sites)
 
 async def get_users_with_sites():
-    if USE_MONGODB and MONGODB_URI:
-        db = await get_mongo_db()
-        if db:
-            return await db.sites.count_documents({})
-    
-    import json
-    import os
-    DB_FILE = "razor_bot_data.json"
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            return len(data["sites"])
-    return 0
+    sites = await get_global_sites()
+    return 1 if sites else 0
 
 async def get_sites_per_user():
-    if USE_MONGODB and MONGODB_URI:
-        db = await get_mongo_db()
-        if db:
-            result = []
-            cursor = db.sites.find({})
-            async for doc in cursor:
-                result.append({"user_id": int(doc["_id"]), "cnt": len(doc.get("sites", {}))})
-            return result
-    
-    import json
-    import os
-    DB_FILE = "razor_bot_data.json"
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            return [{"user_id": int(uid), "cnt": len(sites)} for uid, sites in data["sites"].items()]
-    return []
+    sites = await get_global_sites()
+    return [{"user_id": "global", "cnt": len(sites)}]
 
 async def get_all_sites_detail():
     if USE_MONGODB and MONGODB_URI:
         db = await get_mongo_db()
         if db:
-            result = []
-            cursor = db.sites.find({})
-            async for doc in cursor:
-                uid = int(doc["_id"])
-                for site, info in doc.get("sites", {}).items():
+            doc = await db.globalsites.find_one({"_id": "global"})
+            if doc and "sites" in doc:
+                result = []
+                for site, info in doc["sites"].items():
                     result.append({
-                        "user_id": uid,
+                        "user_id": "global",
                         "site": site,
                         "gateway": info.get("gateway", "Unknown"),
                         "price": info.get("price", "0")
                     })
-            return result
-    
+                return result
+            return []
     import json
     import os
     DB_FILE = "razor_bot_data.json"
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
             data = json.load(f)
+            gs = data.get("global_sites", {})
             result = []
-            for uid, sites_dict in data["sites"].items():
-                for site, info in sites_dict.items():
-                    result.append({
-                        "user_id": int(uid),
-                        "site": site,
-                        "gateway": info.get("gateway", "Unknown"),
-                        "price": info.get("price", "0")
-                    })
+            for site, info in gs.items():
+                result.append({
+                    "user_id": "global",
+                    "site": site,
+                    "gateway": info.get("gateway", "Unknown"),
+                    "price": info.get("price", "0")
+                })
             return result
     return []
 
@@ -916,6 +981,7 @@ async def init_db():
                 await db.users.create_index("_id")
                 await db.cards.create_index("created_at")
                 await db.codes.create_index("used")
+                await db.globalsites.create_index("_id")
                 print("✅ MongoDB connected!")
                 return True
         except Exception as e:
@@ -938,26 +1004,37 @@ async def is_user_marked_joined(user_id):
 async def remove_joined_mark(user_id):
     _joined_cache.discard(user_id)
 
-# ============ GLOBAL SITES ============
-
-async def add_global_site(site):
-    return True
-
-async def get_global_sites():
+async def get_all_user_ids():
+    """Return list of all user IDs (used by /broadcast in JSON mode)."""
+    if USE_MONGODB and MONGODB_URI:
+        db_conn = await get_mongo_db()
+        if db_conn:
+            result = []
+            async for doc in db_conn.users.find({}, {"_id": 1}):
+                try:
+                    result.append(int(doc["_id"]))
+                except Exception:
+                    pass
+            return result
+    # JSON fallback
+    import json as _json
+    import os as _os
+    DB_FILE = "razor_bot_data.json"
+    if _os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            data = _json.load(f)
+            return [int(uid) for uid in data.get("users", {}).keys()]
     return []
-
-async def remove_global_site(site):
-    return True
 
 # Database wrapper
 class DatabaseWrapper:
     def __init__(self):
         self.users = {}
-    
+
     async def find_one(self, collection, query):
         return None
-    
-    async def __getitem__(self, key):
+
+    def __getitem__(self, key):
         return self
 
 db = DatabaseWrapper()

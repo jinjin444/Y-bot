@@ -41,11 +41,16 @@ from database import (
     get_all_premium_users, get_total_users, get_premium_count,
     get_total_sites_count, get_users_with_sites, get_sites_per_user, get_all_sites_detail,
     mark_user_joined, is_user_marked_joined, remove_joined_mark,
-    generate_plan_code, get_all_active_codes, remove_code, redeem_plan_code
+    add_global_site, get_global_sites, remove_global_site, clear_global_sites,
+    generate_plan_code, redeem_plan_code, get_all_active_codes, get_all_codes, get_code_info,
+    get_user_sites_with_info,
+    get_user_info,
+    get_user_hits, get_all_hits,
+    get_all_user_ids,
 )
 
 # ====================== LOGGING ======================
-log = logging.getLogger("EnVoXChkBoT")
+log = logging.getLogger("NomiChkBoT")
 log.setLevel(logging.INFO)
 _log_fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 _ch = logging.StreamHandler()
@@ -53,7 +58,7 @@ _ch.setLevel(logging.INFO)
 _ch.setFormatter(_log_fmt)
 log.addHandler(_ch)
 try:
-    _fh = logging.FileHandler('EnVoXChkBoT.log', encoding='utf-8')
+    _fh = logging.FileHandler('NomiChkBoT.log', encoding='utf-8')
     _fh.setLevel(logging.INFO)
     _fh.setFormatter(_log_fmt)
     log.addHandler(_fh)
@@ -100,8 +105,8 @@ ADMIN_ID = json.loads(os.getenv("ADMIN_ID", "[7132150988]"))
 HIT_CHANNEL_ID = int(os.getenv("HIT_CHANNEL_ID", "-1004416713458"))
 JOIN_GROUP_ID = int(os.getenv("JOIN_GROUP_ID", "-1003837703405"))
 JOIN_CHANNEL_ID = int(os.getenv("JOIN_CHANNEL_ID", "-1003837703405"))
-JOIN_GROUP_LINK = os.getenv("JOIN_GROUP_LINK", "-1003837703405")
-JOIN_CHANNEL_LINK = os.getenv("JOIN_CHANNEL_LINK", "-1003837703405")
+JOIN_GROUP_LINK = os.getenv("JOIN_GROUP_LINK", "https://t.me/nomi_dev")
+JOIN_CHANNEL_LINK = os.getenv("JOIN_CHANNEL_LINK", "https://t.me/nomi_dev2")
 FORCE_JOIN_IMAGES = [
     "",
     ""
@@ -130,13 +135,15 @@ BATCH_SIZE = 60
 SITE_CHECK_BATCH = 40
 HIT_DELAY = 1.5
 PER_USER_LIMIT = 200
-LOG_CHANNEL_ID = HIT_CHANNEL_ID
+LOG_CHANNEL_ID = -1003932878753
+SS_CHANNEL_ID = int(os.getenv("SS_CHANNEL_ID", "-1003932878753")) # Separate channel for hit screenshots
 
 FREE_SP_DAILY_LIMIT = 15
 FREE_SP_COOLDOWN = 10
 
+# Updated PLANS with Trial
 PLANS = {
-    "plan0": {"name": bs("Trial Access"), "tier": "Trial", "duration_days": 3, "emoji": "🧪", "price": "$0.00"},
+    "trial": {"name": bs("Trial Access"), "tier": "Trial", "duration_days": 3, "emoji": "🎁", "price": "$5.00"},
     "plan1": {"name": bs("Core Access"), "tier": "Core", "duration_days": 7, "emoji": "🛠️", "price": "$8.00"},
     "plan2": {"name": bs("Elite Access"), "tier": "Elite", "duration_days": 15, "emoji": "👑", "price": "$14.00"},
     "plan3": {"name": bs("Root Access"), "tier": "Root", "duration_days": 30, "emoji": "⭐", "price": "$25.00"},
@@ -203,7 +210,7 @@ _FREE_SP_LAST_USE = {}
 
 BOT_START_TIME = time.time()
 
-HIT_BUTTON = [[Button.url(bs("𝙽𝙾𝙼𝙸 𝙲𝚑𝚔"), "http://t.me/Shopifydev_bot")]]
+HIT_BUTTON = [[Button.url(bs("𝐘 𝙲𝚑𝚔"), "https://t.me/Ydeev_BoT")]]
 
 # ── SEPARATE PER-USER HTTP Session Pools ──
 _USER_HTTP_SESSIONS = {}
@@ -352,7 +359,6 @@ class SmartRotator:
 
 # ====================== ENHANCED SITE ERROR DETECTION (SHOPIFY) ======================
 SITE_ERROR_KEYWORDS = [
-    # --- General site errors ---
     'r4 token empty', 'payment method is not shopify', 'r2 id empty', 'product id is empty',
     'py id empty', 'clinte token', 'receipt_empty', 'receipt id is empty', 'receipt empty',
     'site requires login', 'failed to get token', 'no valid products', 'not shopify',
@@ -475,13 +481,28 @@ SITE_ERROR_KEYWORDS = [
     'submit_failed',
     'graphql_error',
     'graphql_error',
-    'invalid_card',  # although this is a decline, we treat it as a site issue if it's a test card? but test card is valid, so it's a site error
+    'invalid_card',
     'cart_failed',
     'submit_rejected',
     'checkpoint_denied',
-    'no_product',           # added
-    'no_shopify_payments_gateway',  # added
-    'no_shopify_payment_gateway',   # added
+    'no_product',
+    'no_shopify_payments_gateway',
+    'no_shopify_payment_gateway',
+
+    # --- ADDED: HTTP 400 / Bad Request (fix) ---
+    'http_400',
+    '400 bad request',
+    'bad request',
+    'invalid request',
+    'invalid_request',
+    'http 400',
+    '400',
+
+    # --- ADDED: Price over max and throttled (fix for remaining errors) ---
+    'price_over_max',
+    'no_product: throttled',
+    'no_product',
+    'throttled',
 ]
 
 PROXY_ERROR_KEYWORDS = [
@@ -510,7 +531,12 @@ def is_site_error(text):
     lower = text.lower().strip()
     if lower == 'na':
         return True
-    # Check against expanded keywords
+    # Quick check for 400 explicitly
+    if '400' in lower or 'bad request' in lower:
+        return True
+    # Check for price_over_max or throttled
+    if 'price_over_max' in lower or 'no_product: throttled' in lower or 'no_product' in lower:
+        return True
     return any(kw in lower for kw in SITE_ERROR_KEYWORDS)
 
 
@@ -528,7 +554,6 @@ def is_rz_retry_error(text):
 
 
 def is_truly_alive(response, price):
-    """Return True if the response indicates a valid card processing outcome (even if declined)."""
     if not response:
         return False
     lower = response.lower().strip()
@@ -537,7 +562,6 @@ def is_truly_alive(response, price):
         pv = float(pc)
     except:
         pv = 0.0
-    # These are not valid card outcomes – site errors
     bad = ['error:', 'error: ', "error: '", 'cart failed', 'invalid json',
            'inventoryreservationfailure', 'payments_positive_amount',
            'payments_payment_flexibility', 'payments_credit_card_brand',
@@ -545,11 +569,11 @@ def is_truly_alive(response, price):
            'tokenization_failed', 'no_session_token', 'submit_failed', 'graphql_error',
            'cart_failed', 'submit_rejected', 'checkpoint_denied',
            'site_requires_login', 'invalid_card',
-           'no_product', 'no_shopify_payments_gateway', 'no_shopify_payment_gateway']
+           'no_product', 'no_shopify_payments_gateway', 'no_shopify_payment_gateway',
+           '400', 'bad request', 'price_over_max', 'no_product: throttled']
     for b in bad:
         if b in lower:
             return False
-    # If price is 0, we still accept if the response contains common decline keywords
     if pv == 0.0:
         normal = ['card_declined', 'card declined', 'generic_decline', 'generic decline',
                    'do_not_honor', 'do not honor', 'insufficient_funds', 'insufficient funds',
@@ -652,7 +676,7 @@ def format_card_result(status, card, gateway, response, price="-", site="-", bin
     }
     h, he = sm.get(status, sm["Declined"])
     bi = bin_info or {"brand": "-", "type": "-", "level": "-", "bank": "-", "country": "-", "flag": "🏳️"}
-    ps = f"${str(price).replace('$', '')}" if price and price != "-" else "-"
+    ps = str(price).replace('$', '').strip() if price and price != "-" else "-"
     return f"""{h}
 <b>━━━━━━━━━━━━━━━━━</b>
 <a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Card')}</b>
@@ -668,7 +692,7 @@ def format_card_result(status, card, gateway, response, price="-", site="-", bin
 <b>{bs('Took')}</b> ⏱ <code>{elapsed:.2f}{bs('s')}</code>""", he
 
 
-def format_card_result_no_price(status, card, gateway, response, bin_info=None):
+def format_card_result_no_price(status, card, gateway, response, bin_info=None, elapsed=0.0):
     sm = {
         "Charged": (f"<b>{bs('CHARGED')}</b> {PE}", [CE["fire"]]),
         "Approved": (f"<b>{bs('APPROVED')}</b> {PE}", [CE["check"]]),
@@ -686,7 +710,9 @@ def format_card_result_no_price(status, card, gateway, response, bin_info=None):
 <b>━━━━━━━━━━━━━━━━━</b>
 <b>{bs('BIN')}:</b> <code>{bi.get('brand', '-')} | {bi.get('type', '-')} | {bi.get('level', '-')}</code>
 <b>{bs('Bank')}:</b> <code>{bi.get('bank', '-')}</code>
-<b>{bs('Country')}:</b> <code>{bi.get('country', '-')} {bi.get('flag', '🏳️')}</code>""", he
+<b>{bs('Country')}:</b> <code>{bi.get('country', '-')} {bi.get('flag', '🏳️')}</code>
+
+<b>{bs('Took')}</b> ⏱ <code>{elapsed:.2f}{bs('s')}</code>""", he
 
 
 def format_simple_card_result(status, card, gateway, response, bin_info=None, elapsed=0.0, extra_field=None):
@@ -759,6 +785,7 @@ async def is_user_joined(user_id):
     return True
 
 
+
 async def force_join_check(event):
     if event.sender_id in ADMIN_ID:
         return True
@@ -775,8 +802,8 @@ async def force_join_check(event):
 <b>━━━━━━━━━━━━━━━━━</b>
 {PE} <b>{bs('Join Both Chats to Unlock')}</b>
 <b>━━━━━━━━━━━━━━━━━</b>
-{PE} <b>{bs('Channel')}:</b> <i>{bs('𝙴𝚗𝚅𝚘𝚇 𝙲𝚑𝚔 CHANNEL')}</i>
-{PE} <b>{bs('Group')}:</b> <i>{bs('𝙴𝚗𝚅𝚘𝚇 𝙲𝚑𝚔 Chat')}</i>
+{PE} <b>{bs('Channel')}:</b> <a href='{JOIN_CHANNEL_LINK}'>{bs('𝐘 𝙲𝚑𝚔 CHANNEL')}</a>
+{PE} <b>{bs('Group')}:</b> <a href='{JOIN_GROUP_LINK}'>{bs('𝐘 𝙲𝚑𝚔 Chat')}</a>
 <b>━━━━━━━━━━━━━━━━━</b>
 {PE} <b>{bs('All Features Restricted')}</b>"""
     try:
@@ -845,10 +872,10 @@ def get_cc_limit(plan, uid=None):
         return 50000
     p = plan.title() if plan else "Bronze"
     if p == "X": return 50000
-    if p == "Root": return 5000
-    if p == "Elite": return 2500
-    if p == "Core": return 1500
-    if p == "Trial": return 500
+    if p == "Root": return 10000
+    if p == "Elite": return 5000
+    if p == "Core": return 2500
+    if p == "Trial": return 2000
     return 0
 
 
@@ -867,7 +894,7 @@ async def send_premium_only_message(event):
     return await styled_reply(event, f"""{PE} <b>{bs('Premium Only')}</b> {PE}
 <b>━━━━━━━━━━━━━━━━━</b>
 {PE} <b>{bs('This feature requires an active plan')}</b>
-{PE} <i>{bs('Use /plan to see available plans')}</i>""", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/ravenu899")]], emoji_ids=[CE["stop"], CE["stop"], CE["warn"], CE["info"]])
+{PE} <i>{bs('Use /plan to see available plans')}</i>""", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["stop"], CE["stop"], CE["warn"], CE["info"]])
 
 
 def banned_user_message():
@@ -987,9 +1014,8 @@ def classify_response(rj):
     st = rj.get('Status', False)
     price = rj.get('Price', '-')
     gw = rj.get('Gate', rj.get('Gateway', 'Shopify'))
-    if price is not None and price != '-': price = f"${price}"
+    if price is not None and price != '-': price = str(price).replace('$', '').strip()
     rl = ar.lower()
-    # Check for site errors including throttling and new keywords
     if is_site_error(ar) or is_proxy_error(ar) or '429' in rl or 'throttled' in rl or 'too many requests' in rl:
         return {"Response": ar, "Price": price, "Gateway": gw, "Status": "SiteError"}
     ch = ['order_paid', 'order_placed', 'order_confirmed', 'thank you', 'payment successful', 'order_completed', 'charged', 'order_created', 'order confirmed']
@@ -1000,7 +1026,6 @@ def classify_response(rj):
     if any(k in rl for k in dc): return {"Response": ar, "Price": price, "Gateway": gw, "Status": "Declined"}
     if st is True and not any(w in rl for w in ["decline", "denied", "failed", "error", "rejected", "refused", "fraud"]):
         return {"Response": ar, "Price": price, "Gateway": gw, "Status": "Approved"}
-    # If none of the above, treat as SiteError to avoid adding such sites
     return {"Response": ar, "Price": price, "Gateway": gw, "Status": "SiteError"}
 
 
@@ -1028,47 +1053,94 @@ async def check_card_api(card, site, proxy_data=None, user_id=None, http_session
         return {"Response": err[:100], "Price": "-", "Gateway": "Unknown", "Status": st2, "card": card, "site": site}
 
 
+# ====================== ENHANCED RETRY (UPDATED) ======================
 async def check_card_with_retry(card, sites, user_id=None, proxies_data=None, max_retries=3, rotator=None, cancel_check=None, http_session=None):
+    """
+    Check a single card across multiple sites.
+    For each site, it will try up to 2 different proxies before moving to the next site.
+    """
     if not sites:
         return {"Response": "No sites", "Price": "-", "Gateway": "-", "Status": "Error", "card": card}, -1
+
     tried_sites = set()
-    tried_proxies = set()
-    last = None
-    for attempt in range(max_retries):
+    tried_proxies = set()          # tracks proxies already tried for the current site
+    last_result = None
+
+    # Number of proxy attempts per site
+    PROXY_RETRIES_PER_SITE = 2
+
+    # Increase overall attempts if we want more retries
+    max_site_attempts = max_retries   # e.g., 3 sites
+
+    for attempt in range(max_site_attempts):
         if cancel_check and cancel_check():
             return {"Response": "Stopped", "Price": "-", "Gateway": "-", "Status": "Error", "card": card}, -1
-        if rotator: site = rotator.pick_site(sites, exclude=tried_sites)
+
+        # Pick a site (excluding already tried)
+        if rotator:
+            site = rotator.pick_site(sites, exclude=tried_sites)
         else:
             available = [s for s in sites if s not in tried_sites] or list(sites)
             site = random.choice(available)
         tried_sites.add(site)
-        proxy_data = None
-        if proxies_data:
-            if rotator: proxy_data = rotator.pick_proxy(proxies_data, exclude=tried_proxies)
-            else:
-                available_px = [p for p in proxies_data if p.get('proxy_url') not in tried_proxies] or list(proxies_data)
-                proxy_data = random.choice(available_px)
-            if proxy_data: tried_proxies.add(proxy_data.get('proxy_url'))
-        result = await check_card_api(card, site, proxy_data, user_id, http_session=http_session)
-        # If site error, try again with another site; if not, return result
-        if result.get("Status") != "SiteError":
+
+        # For this site, try different proxies (up to PROXY_RETRIES_PER_SITE)
+        site_proxy_tried = set()
+        for proxy_attempt in range(PROXY_RETRIES_PER_SITE):
+            if cancel_check and cancel_check():
+                return {"Response": "Stopped", "Price": "-", "Gateway": "-", "Status": "Error", "card": card}, -1
+
+            proxy_data = None
+            if proxies_data:
+                # pick a proxy not tried for this site yet (but we can reuse proxies across sites)
+                # We'll use a per-site proxy blacklist to avoid repeating the same bad proxy on the same site.
+                available_px = [p for p in proxies_data if p.get('proxy_url') not in site_proxy_tried]
+                if not available_px:
+                    # if all proxies have been tried for this site, break out of proxy loop
+                    break
+                # optionally we could also avoid proxies that are globally blacklisted by rotator
+                if rotator:
+                    proxy_data = rotator.pick_proxy(available_px, exclude=site_proxy_tried)
+                else:
+                    proxy_data = random.choice(available_px)
+                if proxy_data:
+                    site_proxy_tried.add(proxy_data.get('proxy_url'))
+
+            # Perform the actual API call
+            result = await check_card_api(card, site, proxy_data, user_id, http_session=http_session)
+
+            # If the result is NOT a site error, we consider this card check successful
+            if result.get("Status") != "SiteError":
+                if rotator:
+                    rotator.report_site_ok(site)
+                    if proxy_data:
+                        rotator.report_proxy_ok(proxy_data.get('proxy_url'))
+                # return the site index (first site is index 0)
+                return result, sites.index(site) + 1
+
+            # If we get a site error, we mark the site and proxy as failed
             if rotator:
-                rotator.report_site_ok(site)
-                if proxy_data: rotator.report_proxy_ok(proxy_data.get('proxy_url'))
-            return result, sites.index(site) + 1
-        if rotator:
-            rotator.report_site_fail(site)
-            if proxy_data and is_proxy_error(result.get("Response", "")):
-                rotator.report_proxy_fail(proxy_data.get('proxy_url'))
-        last = result
-        # If throttled, wait longer before retry
-        if '429' in str(result.get('Response', '')).lower() or 'throttled' in str(result.get('Response', '')).lower():
-            await asyncio.sleep(2)  # extra delay for throttled sites
-        elif attempt < max_retries - 1:
-            await asyncio.sleep(0.3)
-    if last:
-        last["Status"] = "Error"
-        return last, -1
+                rotator.report_site_fail(site)
+                if proxy_data and is_proxy_error(result.get("Response", "")):
+                    rotator.report_proxy_fail(proxy_data.get('proxy_url'))
+
+            last_result = result
+
+            # If the error is due to throttling, wait a bit longer before next attempt
+            resp_lower = str(result.get('Response', '')).lower()
+            if '429' in resp_lower or 'throttled' in resp_lower or 'too many requests' in resp_lower:
+                await asyncio.sleep(2)
+            else:
+                # small delay between proxy attempts
+                await asyncio.sleep(0.3)
+
+        # If we've exhausted all proxies for this site, move to next site
+        # (the outer loop will pick a new site)
+
+    # If we exit the loop, all sites failed
+    if last_result:
+        last_result["Status"] = "Error"
+        return last_result, -1
     return {"Response": "Max retries", "Price": "-", "Gateway": "-", "Status": "Error", "card": card}, -1
 
 
@@ -1080,19 +1152,18 @@ async def test_site(site, proxy_data=None, http_session=None):
         s = http_session or (await get_user_http_session(0, "site"))
         async with s.get(url) as resp:
             if resp.status != 200:
+                # Treat any non-200 as dead (including 400)
                 return {'site': site, 'status': 'dead', 'price': '-', 'response': f'HTTP_{resp.status}'}
             try: raw = await resp.json(content_type=None)
             except: return {'site': site, 'status': 'dead', 'price': '-', 'response': 'Invalid JSON'}
         rm = raw.get('Response', '')
         price = raw.get('Price', '-')
         if price and price != '-': price = f"${price}"
-        # Check for site error (including throttling and new keywords)
-        if is_site_error(rm.lower()):
+        # Check for site error (including 400, price_over_max, throttled)
+        if is_site_error(rm.lower()) or '400' in rm.lower() or 'bad request' in rm.lower() or 'price_over_max' in rm.lower() or 'no_product' in rm.lower():
             return {'site': site, 'status': 'dead', 'price': price, 'response': rm}
-        # Check if the response indicates a valid card check
         if not is_truly_alive(rm, price):
             return {'site': site, 'status': 'dead', 'price': price, 'response': rm}
-        # Additional filter: if response contains 'error' or 'failed' and not a known decline, consider dead
         lower_rm = rm.lower()
         if ('error' in lower_rm or 'failed' in lower_rm) and not any(k in lower_rm for k in ['card_declined', 'generic_decline', 'do_not_honor', 'insufficient_funds', 'stolen_card', 'lost_card', 'expired_card', 'restricted_card', 'fraudulent', 'not_permitted', 'transaction_not_allowed', 'card_not_supported', 'invalid_cvc', 'incorrect_cvc', 'ccn live', 'invalid_zip', 'incorrect_zip']):
             return {'site': site, 'status': 'dead', 'price': price, 'response': rm}
@@ -1287,12 +1358,12 @@ async def _build_status_text():
     )
     if s["cpu_critical"] or s["memory_critical"] or s["disk_critical"]:
         msg += "\n⚠️ <b>Warning:</b> System resources critically low!"
-    msg += f"\n――――――――――――――\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/TyrantProX'>𝑹@Mydev1</a>"
+    msg += f"\n――――――――――――――\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/Mydev1'>𝑹@Mydev1</a>"
     return msg
 
 
 # ====================== CLIENT ======================
-client = TelegramClient('Shopifydev_bot', API_ID, API_HASH)
+client = TelegramClient('𝐘ChkBoT', API_ID, API_HASH)
 client_instance = client
 
 
@@ -1327,7 +1398,6 @@ async def pin_charged_message(event, msg):
     except: pass
 
 
-# ====================== /start ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.](start|cmds?|commands?)$'))
 async def start(event):
     try:
@@ -1349,16 +1419,8 @@ async def start(event):
             sl = f"<b>{bs('STATUS')}</b> ━ 🆓 <b>{plan.upper()}</b> (<code>{FREE_SP_DAILY_LIMIT}/{bs('day')}</code> {bs('in group')})"
             se = []
 
-        # Build command list – hide site commands from non‑admins
-        site_section = ""
-        if event.sender_id in ADMIN_ID:
-            site_section = f"""
-{PE} <b><i>{bs('Sites')}</i></b>
-|   {PE} <code>/add</code> ━ <b>{bs('Add sites')}</b>
-|   {PE} <code>/rm</code> ━ <b>{bs('Remove')}</b>
-|   {PE} <code>/sites</code> ━ <b>{bs('View')}</b>
-|   {PE} <code>/site</code> ━ <b>{bs('Test all')}</b>"""
-
+        # Build the command list – Sites section only for admins
+        is_admin = event.sender_id in ADMIN_ID
         text = f"""{PE} <b><i>{bs('Shopify')}</i></b>
 |   {PE} <code>/sp</code> ━ <b>{bs('Single CC')}</b>
 |   {PE} <code>/msp</code> ━ <b>{bs('Mass CC')}</b>
@@ -1366,7 +1428,22 @@ async def start(event):
 {PE} <b><i>{bs('RazorPay')}</i></b>
 |   {PE} <code>/rz</code> ━ <b>{bs('Single CC')}</b>
 |   {PE} <code>/mrz</code> ━ <b>{bs('Mass CC')}</b>
-{site_section}
+"""
+        if is_admin:
+            text += f"""
+{PE} <b><i>{bs('Sites')}</i></b>
+|   {PE} <code>/add</code> ━ <b>{bs('Add sites')}</b>
+|   {PE} <code>/rm</code> ━ <b>{bs('Remove')}</b>
+|   {PE} <code>/sites</code> ━ <b>{bs('View')}</b>
+|   {PE} <code>/site</code> ━ <b>{bs('Test all')}</b>
+
+{PE} <b><i>{bs('Admin')}</i></b>
+|   {PE} <code>/broadcast</code> ━ <b>{bs('Message All Users')}</b>
+|   {PE} <code>/stats</code> ━ <b>{bs('Bot Stats')}</b>
+|   {PE} <code>/allhits</code> ━ <b>{bs('All User Hits')}</b>
+|   {PE} <code>/allhits [uid]</code> ━ <b>{bs('Hits by User')}</b>
+"""
+        text += f"""
 {PE} <b><i>{bs('Proxy')}</i></b> ({bs('Private')})
 |   {PE} <code>/addpxy</code> ━ <b>{bs('Add')}</b>
 |   {PE} <code>/proxy</code> ━ <b>{bs('View')}</b>
@@ -1376,11 +1453,13 @@ async def start(event):
 {PE} <b><i>{bs('Account')}</i></b>
 |   {PE} <code>/info</code> ━ <b>{bs('Profile')}</b>
 |   {PE} <code>/plan</code> ━ <b>{bs('Plans')}</b>
-|   {PE} <code>/redeem</code> ━ <b>{bs('Redeem Code')}</b>
+|   {PE} <code>/fb</code> ━ <b>{bs('Send Feedback')}</b>
+|   {PE} <code>/myhits</code> ━ <b>{bs('My Hit Cards')}</b>
 <b>━━━━━━━━━━━━━━━━━</b>
 {sl}"""
         kb = [[pbtn(bs("Plans"), data="show_plans"), pbtn(bs("Support"), url="https://t.me/Mydev1")],
               [pbtn(bs("Channel"), url=JOIN_CHANNEL_LINK), pbtn(bs("Group"), url=JOIN_GROUP_LINK)]]
+        # Emoji IDs: adjust based on which sections are shown
         ei = [CE["bolt"], CE["search"], CE["pin"], CE["fire"], CE["search"], CE["pin"], CE["brain"], CE["plus"], CE["cross"], CE["globe"], CE["link"], CE["shield"], CE["link"], CE["eyes"], CE["tick"], CE["trash"], CE["info"], CE["info"]] + se
         await styled_reply(event, text, buttons=kb, emoji_ids=ei)
     except Exception as e:
@@ -1410,9 +1489,16 @@ async def plans_cb(event):
     for pid, pi in PLANS.items():
         plans_text += f"\n{pi['emoji']} <b>{pi['name']}</b> ━ <b>{pi['duration_days']}{bs('d')}</b> ━ <b>{pi['price']}</b>"
     plans_text += f"\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Current')}:</b> <b>{cp.upper()}</b>"
-    await styled_send(event.chat_id, plans_text, buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
+    await styled_send(event.chat_id, plans_text, buttons=[[pbtn(bs("Redeem Code"), data="show_redeem"), pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
 
 
+@client.on(events.CallbackQuery(data=b"show_redeem"))
+async def show_redeem_cb(event):
+    await event.answer()
+    await styled_send(event.chat_id, f"{PE} <b>{bs('Redeem Code')}</b> {PE}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <code>/redeem &lt;code&gt;</code>\n{PE} <i>{bs('Enter the code you received')}</i>", emoji_ids=[CE["gift"], CE["info"]])
+
+
+# ====================== /plan ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]plan$'))
 async def show_plans(event):
     if await check_maintenance(event): return
@@ -1424,9 +1510,10 @@ async def show_plans(event):
     for pid, pi in PLANS.items():
         plans_text += f"\n{pi['emoji']} <b>{pi['name']}</b> ━ <b>{pi['duration_days']}{bs('d')}</b> ━ <b>{pi['price']}</b>"
     plans_text += f"""\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Current')}:</b> <b>{cp.upper()}</b>\n{PE} <i>{bs('Contact admin')}</i>"""
-    await styled_reply(event, plans_text, buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
+    await styled_reply(event, plans_text, buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1"), pbtn(bs("Redeem Code"), data="show_redeem")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
 
 
+# ====================== /info (FIXED) ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]info$'))
 async def info_cmd(event):
     if await check_maintenance(event): return
@@ -1434,21 +1521,34 @@ async def info_cmd(event):
     if await is_banned_user(event.sender_id):
         t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
     await ensure_user(event.sender_id)
-    plan = await get_user_plan(event.sender_id)
-    sites = await get_user_sites(event.sender_id)
+    user_info = await get_user_info(event.sender_id)
+    plan = user_info.get("plan", "Bronze")
+    expiry_str = user_info.get("expiry")
+    if expiry_str:
+        try:
+            if isinstance(expiry_str, str):
+                exp_date = datetime.fromisoformat(expiry_str)
+            else:
+                exp_date = expiry_str
+            exp_str = exp_date.strftime('%Y-%m-%d')
+        except:
+            exp_str = bs("Invalid")
+    else:
+        exp_str = bs("Never")
+    global_sites = await get_global_sites()
     pc = await get_proxy_count(event.sender_id)
     plan_emoji = "🆓"
     for pi in PLANS.values():
         if pi["tier"].lower() == plan.lower(): plan_emoji = pi["emoji"]; break
-    user_doc = await db["users"].find_one({"_id": str(event.sender_id)}) if hasattr(db, 'users') else None
-    expiry = user_doc.get("expiry") if user_doc else None
-    exp_str = expiry.strftime('%Y-%m-%d') if expiry else bs("Never")
     status = bs("Active") if is_paid_plan(plan) else bs("Free")
     limit_text = f"<code>{get_cc_limit(plan, event.sender_id)}</code>" if is_paid_plan(plan) else f"<code>{FREE_SP_DAILY_LIMIT}/{bs('day')} ({bs('group')})</code>"
     used_today = get_free_sp_usage(event.sender_id)
     usage_line = ""
     if not is_paid_plan(plan) and event.sender_id not in ADMIN_ID:
         usage_line = f"\n{PE} <b>{bs('Used Today')}:</b> <code>{used_today}/{FREE_SP_DAILY_LIMIT}</code>"
+    all_codes = await get_all_codes()
+    redeemed_codes = [c for c, info in all_codes.items() if info.get("used_by") == event.sender_id]
+    redeemed_count = len(redeemed_codes)
     await styled_reply(event, f"""{PE} <b>{bs('Profile')}</b> {PE}
 <b>━━━━━━━━━━━━━━━━━</b>
 {PE} <b>{bs('ID')}:</b> <code>{event.sender_id}</code>
@@ -1456,18 +1556,18 @@ async def info_cmd(event):
 {PE} <b>{bs('Plan')}:</b> {plan_emoji} <b>{plan.upper()}</b>
 {PE} <b>{bs('Expiry')}:</b> <code>{exp_str}</code>
 {PE} <b>{bs('Limit')}:</b> {limit_text}{usage_line}
-{PE} <b>{bs('Sites')}:</b> <code>{len(sites)}</code>
-{PE} <b>{bs('Proxies')}:</b> <code>{pc}/{bs('100')}</code>""", emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["star"], CE["crown"], CE["chart"], CE["globe"], CE["link"], CE["shield"]])
+{PE} <b>{bs('Global Sites')}:</b> <code>{len(global_sites)}</code>
+{PE} <b>{bs('Proxies')}:</b> <code>{pc}/{bs('100')}</code>
+{PE} <b>{bs('Redeemed Codes')}:</b> <code>{redeemed_count}</code>""", emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["star"], CE["crown"], CE["chart"], CE["globe"], CE["link"], CE["shield"], CE["gift"]])
 
 
-# ====================== SITE MANAGEMENT (Admin only) ======================
+# ====================== SITE MANAGEMENT (ADMIN ONLY) ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]add\b'))
 async def add_site(event):
     if event.sender_id not in ADMIN_ID:
-        return
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await check_maintenance(event): return
     if not await force_join_check(event): return
-    # No further checks – admin only
     try:
         sta = []
         if event.is_reply:
@@ -1486,11 +1586,11 @@ async def add_site(event):
                 if s not in sta: sta.append(s)
         if not sta:
             return await styled_reply(event, f"""{PE} <b>{bs('Add Site')}</b> {PE}\n{PE} <code>/add site.com</code>\n{PE} <i>{bs('Or reply .txt with')} </i><code>/add</code>""", emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["link"]])
-        existing_norm = {normalize_site_url(s) for s in await get_user_sites(event.sender_id)}
+        existing = set(await get_global_sites())
         new_sites, already_exists = [], []
         for site in sta:
             n = normalize_site_url(site)
-            if n in existing_norm: already_exists.append(n)
+            if n in existing: already_exists.append(n)
             elif n not in [normalize_site_url(s) for s in new_sites]: new_sites.append(n)
         if not new_sites:
             return await styled_reply(event, f"""{PE} <b>{bs('All sites already exist')}</b> {PE}\n{PE} <b>{bs('Duplicates')}:</b> <code>{len(already_exists)}</code>""", emoji_ids=[CE["warn"], CE["warn"], CE["info"]])
@@ -1549,7 +1649,7 @@ async def _process_add_sites(event, new_sites, already_exists, max_price):
                         except: pass
                     working_sites_data.append({'site': site, 'response': res.get('response', '-'), 'price': ps, 'price_val': price_val})
                     if price_val <= max_price:
-                        if await add_site_db(uid, site): added_to_db += 1
+                        if await add_global_site(site, "Shopify", ps): added_to_db += 1
                 else: dead += 1
                 await update_ui()
             except asyncio.CancelledError: raise
@@ -1566,53 +1666,61 @@ async def _process_add_sites(event, new_sites, already_exists, max_price):
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]rm\b'))
 async def remove_site(event):
     if event.sender_id not in ADMIN_ID:
-        return
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await check_maintenance(event): return
     if not await force_join_check(event): return
     rt = re.sub(r'^[/.]rm\s*', '', event.raw_text, flags=re.IGNORECASE).strip()
     if rt.lower() == 'all':
-        existing = await get_user_sites(event.sender_id)
+        existing = await get_global_sites()
         if not existing: return await styled_reply(event, f"{PE} <b>{bs('No sites')}</b>", emoji_ids=[CE["warn"]])
         c = 0
         for s in existing:
-            if await remove_site_db(event.sender_id, s): c += 1
+            if await remove_global_site(s): c += 1
         return await styled_reply(event, f"{PE} <b>{bs('Removed')} {c} {bs('sites')}</b>", emoji_ids=[CE["check"]])
     if not rt: return await styled_reply(event, f"{PE} <code>/rm site.com</code> {bs('or')} <code>/rm all</code>", emoji_ids=[CE["info"]])
     to_rm = extract_urls_from_text(rt)
     if not to_rm: return await styled_reply(event, f"{PE} <b>{bs('No URLs')}</b>", emoji_ids=[CE["cross"]])
-    existing = await get_user_sites(event.sender_id)
+    existing = await get_global_sites()
     removed = []
     for s in to_rm:
         n = normalize_site_url(s)
-        for ex in existing:
-            if normalize_site_url(ex) == n:
-                if await remove_site_db(event.sender_id, ex): removed.append(ex)
-                break
+        if n in existing:
+            if await remove_global_site(n): removed.append(n)
     await styled_reply(event, f"{PE} <b>{bs('Removed')}:</b> <code>{len(removed)}</code>", emoji_ids=[CE["check"]])
 
 
+# ====================== /sites (ADMIN ONLY) ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]sites$'))
 async def list_sites(event):
     if event.sender_id not in ADMIN_ID:
-        return
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await check_maintenance(event): return
     if not await force_join_check(event): return
-    sites = await get_user_sites(event.sender_id)
-    if not sites: return await styled_reply(event, f"{PE} <b>{bs('No sites')}</b> <code>/add</code>", emoji_ids=[CE["warn"]])
-    text = f"{PE} <b>{bs('Sites')}</b> ({len(sites)}) {PE}\n<b>━━━━━━━━━━━━━━━━━</b>\n"
+    if await is_banned_user(event.sender_id):
+        t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
+    sites_info = await get_user_sites_with_info(event.sender_id)
+    if not sites_info:
+        return await styled_reply(event, f"{PE} <b>{bs('No sites')}</b> <code>/add</code>", emoji_ids=[CE["warn"]])
+    text = f"{PE} <b>{bs('Sites')}</b> ({len(sites_info)}) {PE}\n<b>━━━━━━━━━━━━━━━━━</b>\n"
     eid = [CE["fire"], CE["fire"]]
-    for i, s in enumerate(sites[:50], 1): text += f"{PE} <code>{i}.</code> <b>{s}</b>\n"; eid.append(CE["link"])
-    if len(sites) > 50: text += f"\n<i>+{len(sites)-50} more</i>"
+    for i, site_data in enumerate(sites_info[:50], 1):
+        site = site_data.get('site', 'unknown')
+        price = site_data.get('price', '0')
+        gateway = site_data.get('gateway', 'Unknown')
+        text += f"{PE} <code>{i}.</code> <b>{site}</b> → <code>${price}</code> ({gateway})\n"
+        eid.append(CE["link"])
+    if len(sites_info) > 50:
+        text += f"\n<i>+{len(sites_info)-50} more</i>"
     await styled_reply(event, text, emoji_ids=eid)
 
 
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]site$'))
 async def check_sites_cmd(event):
     if event.sender_id not in ADMIN_ID:
-        return
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await check_maintenance(event): return
     if not await force_join_check(event): return
-    sites = await get_user_sites(event.sender_id)
+    sites = await get_global_sites()
     if not sites: return await styled_reply(event, f"{PE} <b>{bs('No sites')}</b>", emoji_ids=[CE["warn"]])
     uid = event.sender_id
     PENDING_SITE_CHECK[uid] = {"sites": sites, "event": event}
@@ -1670,7 +1778,7 @@ async def _process_site_check(event, sites, max_price):
         await asyncio.gather(*[asyncio.create_task(check_worker(s)) for s in sites[i:i+SITE_PER_USER_WORKERS]], return_exceptions=True)
     for s in sites:
         n = normalize_site_url(s)
-        if n in dead_sites or n in price_removed_sites: await remove_site_db(uid, s)
+        if n in dead_sites or n in price_removed_sites: await remove_global_site(n)
     try: await styled_edit(sm, f"""{PE} <b>{bs('Done')}</b> | ✅{alive_count} ❌{dead_count} | {bs('Kept')}:{kept_count} | {bs('Removed')}:{dead_count + removed_price}""", emoji_ids=[CE["fire"]])
     except: pass
     await cleanup_user_http_session(uid, "site"); cleanup_user_sem(uid)
@@ -1824,19 +1932,9 @@ async def single_cc_check(event):
     if not await _check_free_limits(event, uid, plan, is_group): return
     try: sender = await event.get_sender(); username = sender.username or f"user_{uid}"; name = sender.first_name or username
     except: username, name = f"user_{uid}", "User"
-    if is_paid_plan(plan) or uid in ADMIN_ID:
-        sites = await get_user_sites(uid); proxies = await get_all_user_proxies(uid)
-    else:
-        sites, proxies = [], []
-        for aid in ADMIN_ID:
-            sites = await get_user_sites(aid); proxies = await get_all_user_proxies(aid)
-            if sites: break
-        if not sites:
-            try:
-                from database import get_global_sites
-                sites = await get_global_sites()
-            except: pass
-    if not sites: return await styled_reply(event, f"{PE} <b>{bs('No sites!')} </b><code>/add</code>", emoji_ids=[CE["warn"]])
+    sites = await get_global_sites()
+    proxies = await get_all_user_proxies(uid)
+    if not sites: return await styled_reply(event, f"{PE} <b>{bs('No global sites!')} </b><code>/add</code> (admin)", emoji_ids=[CE["warn"]])
     rm = await event.get_reply_message() if event.reply_to_msg_id else None
     card = _get_card_from_event(event, rm)
     if not card: return await styled_reply(event, f"{PE} <code>/sp card|mm|yy|cvv</code>", emoji_ids=[CE["info"]])
@@ -1853,7 +1951,7 @@ async def single_cc_check(event):
         elapsed = round(time.time() - st, 2)
         status = result.get('Status', 'Declined')
         if status in ["Charged", "Approved"]:
-            asyncio.create_task(save_card_to_db(card, status.upper(), result.get('Response', ''), result.get('Gateway', ''), result.get('Price', '')))
+            asyncio.create_task(save_card_to_db(card, status.upper(), result.get('Response', ''), result.get('Gateway', ''), result.get('Price', ''), user_id=uid))
         msg, eid = format_simple_card_result(status, card, result.get('Gateway', '?'), result.get('Response', '')[:150], bi, elapsed, extra_field=("Price", result.get('Price', '-')) if result.get('Price', '-') != '-' else None)
         try: await lm.delete()
         except: pass
@@ -1899,7 +1997,7 @@ async def rz_single_check(event):
         elapsed = round(time.time() - st, 2)
         status = result.get('Status', 'Declined')
         if status in ["Charged", "Approved"]:
-            asyncio.create_task(save_card_to_db(card, status.upper(), result.get('Response', ''), 'RazorPay', '-'))
+            asyncio.create_task(save_card_to_db(card, status.upper(), result.get('Response', ''), 'RazorPay', '-', user_id=uid))
         msg, eid = format_rz_single_result(status, card, 'RazorPay', result.get('Response', '')[:150], bi, elapsed)
         try: await lm.delete()
         except: pass
@@ -1929,7 +2027,7 @@ async def stop_cmd(event):
     await styled_reply(event, f"{PE} <b>{bs('Stopping')}...</b>", emoji_ids=[CE["stop"]])
 
 
-# ====================== GENERIC MASS PROCESSOR (with full report) ======================
+# ====================== GENERIC MASS PROCESSOR (UPDATED with timing) ======================
 async def _run_mass_process(event, cards, proxies, send_approved, process_store, stop_prefix, check_func, gate_name, sem_type):
     uid = event.sender_id
     try: sender = await event.get_sender(); username, name = sender.username or f"user_{uid}", sender.first_name or "User"
@@ -1966,7 +2064,9 @@ async def _run_mass_process(event, cards, proxies, send_approved, process_store,
         async with user_sem:
             if is_stopped(): return
             try:
+                start = time.time()
                 result = await check_func(card, http_session)
+                elapsed = time.time() - start
                 if is_stopped(): return
                 status = result.get("Status", "Declined")
                 resp = result.get("Response", ""); gw = result.get("Gateway", gate_name)
@@ -1979,18 +2079,19 @@ async def _run_mass_process(event, cards, proxies, send_approved, process_store,
                     'response': resp,
                     'gateway': gw,
                     'site': site_used,
-                    'price': price_used
+                    'price': price_used,
+                    'elapsed': elapsed
                 })
                 if status == "Error": errors += 1
                 elif status == "Charged":
                     charged += 1
-                    asyncio.create_task(save_card_to_db(card, "CHARGED", resp, gw, price_used))
-                    asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz))
+                    asyncio.create_task(save_card_to_db(card, "CHARGED", resp, gw, price_used, user_id=uid))
+                    asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
                 elif status == "Approved":
                     approved += 1
-                    asyncio.create_task(save_card_to_db(card, "APPROVED", resp, gw, price_used))
+                    asyncio.create_task(save_card_to_db(card, "APPROVED", resp, gw, price_used, user_id=uid))
                     if send_approved:
-                        asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz))
+                        asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
                 else: declined += 1
                 await update_ui()
             except asyncio.CancelledError: return
@@ -2003,7 +2104,8 @@ async def _run_mass_process(event, cards, proxies, send_approved, process_store,
                         'response': 'Exception',
                         'gateway': gate_name,
                         'site': 'unknown',
-                        'price': '-'
+                        'price': '-',
+                        'elapsed': 0.0
                     })
     batch_size = workers * 2; all_tasks = []
     proc = process_store.get(uid)
@@ -2027,16 +2129,16 @@ async def _run_mass_process(event, cards, proxies, send_approved, process_store,
     await cleanup_user_http_session(uid, sem_type); cleanup_user_sem(uid)
 
 
-async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False):
+async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False, elapsed=0.0):
     await asyncio.sleep(HIT_DELAY)
     try:
         bi = await get_bin_info(card.split("|")[0])
         gw = result.get('Gateway', 'RazorPay' if is_rz else 'Shopify')
         resp = result.get('Response', '')[:150]
         if is_rz:
-            msg, eid = format_card_result_no_price(status, card, gw, resp, bi)
+            msg, eid = format_card_result_no_price(status, card, gw, resp, bi, elapsed)
         else:
-            msg, eid = format_card_result(status, card, gw, resp, result.get('Price', '-'), result.get('site', '-'), bi, 0.0)
+            msg, eid = format_card_result(status, card, gw, resp, result.get('Price', '-'), result.get('site', '-'), bi, elapsed)
         try: await styled_send(uid, msg, emoji_ids=eid, buttons=HIT_BUTTON)
         except: pass
         if status == "Charged":
@@ -2047,25 +2149,26 @@ async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False)
 async def send_full_results_file(uid, all_results, gate_name, total, charged, approved, declined, errors, target_chat):
     if not all_results:
         return
-    fn = f"EnVoXChkBoT_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    fn = f"YChkBoT_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     target = target_chat or uid
     try:
         async with aiofiles.open(fn, 'w', encoding='utf-8') as f:
             await f.write(f"{'='*70}\n")
-            await f.write(f"𝙴𝚗𝚅𝚘𝚇 𝙲𝚑𝚔 MASS CHECK REPORT - {gate_name}\n")
+            await f.write(f"𝐘 𝙲𝚑𝚔 MASS CHECK REPORT - {gate_name}\n")
             await f.write(f"{'='*70}\n")
             await f.write(f"Total Cards: {total} | Charged: {charged} | Approved: {approved} | Declined: {declined} | Errors: {errors}\n")
             await f.write(f"{'='*70}\n\n")
-            await f.write(f"{'Card':<25} {'Status':<12} {'Gateway':<15} {'Site':<30} {'Price':<8} Response\n")
-            await f.write(f"{'-'*70}\n")
+            await f.write(f"{'Card':<25} {'Status':<12} {'Gateway':<15} {'Site':<30} {'Price':<8} {'Time':<8} Response\n")
+            await f.write(f"{'-'*80}\n")
             for res in all_results:
                 card = res['card']
                 status = res['status']
                 gateway = res['gateway'][:15]
                 site = res['site'][:30] if res['site'] else 'unknown'
                 price = res.get('price', '-')
+                elapsed = res.get('elapsed', 0.0)
                 response = res['response'][:60]
-                await f.write(f"{card:<25} {status:<12} {gateway:<15} {site:<30} {price:<8} {response}\n")
+                await f.write(f"{card:<25} {status:<12} {gateway:<15} {site:<30} {price:<8} {elapsed:>6.2f}s {response}\n")
         try: await styled_send(target, f"{PE} <b>{bs('Full Results')}</b> {PE}", emoji_ids=[CE["fire"], CE["fire"]], file=fn)
         except: pass
         try: os.remove(fn)
@@ -2100,8 +2203,8 @@ async def mass_check_cmd(event):
             except: pass
         elif rm.text: content = rm.text
     else: return await styled_reply(event, f"{PE} <b>{bs('Reply to .txt or paste cards after')} </b><code>/msp</code>", emoji_ids=[CE["info"]])
-    sites = await get_user_sites(uid)
-    if not sites: return await styled_reply(event, f"{PE} <b>{bs('No sites!')} </b><code>/add</code>", emoji_ids=[CE["warn"]])
+    sites = await get_global_sites()
+    if not sites: return await styled_reply(event, f"{PE} <b>{bs('No global sites!')} </b><code>/add</code> (admin)", emoji_ids=[CE["warn"]])
     cards = extract_cc(content)
     if not cards: return await styled_reply(event, f"{PE} <b>{bs('No valid cards')}</b>", emoji_ids=[CE["cross"]])
     if len(cards) > cl: cards = cards[:cl]
@@ -2226,6 +2329,147 @@ async def stop_mrz_cb(event):
     await event.answer(f"{bs('Stopping')}...", alert=True)
 
 
+# ====================== /gencode (UPDATED UI) ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]gencode\b'))
+async def gen_code_cmd(event):
+    if event.sender_id not in ADMIN_ID:
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
+    parts = event.raw_text.split()
+    if len(parts) < 2:
+        return await styled_reply(event, f"{PE} <b>{bs('Usage')}:</b> <code>/gencode &lt;plan_key&gt; [count]</code>\n{bs('Keys')}: trial, plan1, plan2, plan3, plan4", emoji_ids=[CE["warn"]])
+    plan_key = parts[1].lower()
+    if plan_key not in PLANS:
+        return await styled_reply(event, f"{PE} <b>{bs('Invalid plan')}</b>", emoji_ids=[CE["cross"]])
+    count = 1
+    if len(parts) >= 3:
+        try: count = int(parts[2])
+        except: pass
+    if count < 1 or count > 50:
+        count = 1
+    codes = await generate_plan_code(plan_key, count)
+    if not codes:
+        return await styled_reply(event, f"{PE} <b>{bs('Failed')}</b>", emoji_ids=[CE["cross"]])
+    plan_info = PLANS[plan_key]
+    msg = f"{plan_info['emoji']} <b>{bs('Generated')} {len(codes)} {bs('codes for')} {plan_info['name']}</b> {plan_info['emoji']}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Plan')}:</b> {plan_info['emoji']} <b>{plan_info['name']}</b> ━ <b>{plan_info['duration_days']}{bs('d')}</b>\n{PE} <b>{bs('Codes')}:</b>\n"
+    eid = [CE["fire"], CE["fire"], CE["crown"], CE["gift"]]
+    for c in codes:
+        msg += f"{PE} <code>{c}</code>\n"
+        eid.append(CE["link"])
+    await styled_reply(event, msg, emoji_ids=eid)
+
+
+# ====================== /redeem (UPDATED UI) ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]redeem\b'))
+async def redeem_cmd(event):
+    if await check_maintenance(event): return
+    if not await force_join_check(event): return
+    if await is_banned_user(event.sender_id):
+        t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
+    parts = event.raw_text.split()
+    if len(parts) < 2:
+        return await styled_reply(event, f"{PE} <code>/redeem &lt;code&gt;</code>", emoji_ids=[CE["info"]])
+    code = parts[1].strip()
+    uid = event.sender_id
+    success, reason = await redeem_plan_code(uid, code)
+    if success:
+        plan = await get_user_plan(uid)
+        plan_info = None
+        for p in PLANS.values():
+            if p["tier"].lower() == plan.lower():
+                plan_info = p; break
+        emoji = plan_info["emoji"] if plan_info else "🎁"
+        await styled_reply(event, f"{emoji} <b>{bs('Redeemed!')}</b> {emoji}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Plan')}:</b> <code>{plan.upper()}</code>\n{PE} <b>{bs('Expiry')}:</b> <code>{plan_info['duration_days']} {bs('days')}</code>", emoji_ids=[CE["check"], CE["crown"]])
+    else:
+        errors = {
+            "invalid": "❌ <b>{bs('Invalid code')}</b>",
+            "used": "❌ <b>{bs('Code already used')}</b>",
+            "has_plan": "❌ <b>{bs('You already have an active plan')}</b>",
+        }
+        await styled_reply(event, errors.get(reason, f"❌ <b>{bs('Error')}</b>"), emoji_ids=[CE["cross"]])
+
+
+# ====================== /cd (Code Usage) ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]cd\b'))
+async def code_usage_cmd(event):
+    if event.sender_id not in ADMIN_ID:
+        return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
+    parts = event.raw_text.split(maxsplit=1)
+    if len(parts) < 2:
+        return await styled_reply(event, f"{PE} <b>{bs('Usage')}:</b>\n{PE} <code>/cd &lt;code&gt;</code> {bs('– check who used a specific code')}\n{PE} <code>/cd user &lt;user_id&gt;</code> {bs('– list all codes used by a user')}\n{PE} <code>/cd all</code> {bs('– show all used codes')}", emoji_ids=[CE["info"]])
+    arg = parts[1].strip()
+    all_codes = await get_all_codes()
+    if not all_codes:
+        return await styled_reply(event, f"{PE} <b>{bs('No codes in database')}</b>", emoji_ids=[CE["warn"]])
+    
+    if arg.lower() == 'all':
+        used = {c: info for c, info in all_codes.items() if info.get("used", False)}
+        if not used:
+            return await styled_reply(event, f"{PE} <b>{bs('No codes have been used yet')}</b>", emoji_ids=[CE["check"]])
+        msg = f"{PE} <b>{bs('Used Codes')}</b> ({len(used)})\n<b>━━━━━━━━━━━━━━━━━</b>\n"
+        eid = [CE["fire"], CE["fire"]]
+        count = 0
+        for code, info in used.items():
+            if count >= 50:
+                msg += f"\n<i>+{len(used)-50} more</i>"
+                break
+            user_id = info.get("used_by", "?")
+            used_at = info.get("used_at", "?")
+            try:
+                entity = await client_instance.get_entity(int(user_id))
+                name = entity.first_name or str(user_id)
+                mention = f"<a href='tg://user?id={user_id}'>{name}</a>"
+            except:
+                mention = f"<code>{user_id}</code>"
+            msg += f"{PE} <code>{code}</code> → {mention} @ <code>{used_at}</code>\n"
+            eid.append(CE["link"])
+            count += 1
+        await styled_reply(event, msg, emoji_ids=eid)
+    
+    elif arg.lower().startswith('user'):
+        parts2 = arg.split()
+        if len(parts2) < 2:
+            return await styled_reply(event, f"{PE} <b>{bs('Usage')}:</b> <code>/cd user &lt;user_id&gt;</code>", emoji_ids=[CE["warn"]])
+        try:
+            target_uid = int(parts2[1])
+        except:
+            return await styled_reply(event, f"{PE} <b>{bs('Invalid user ID')}</b>", emoji_ids=[CE["cross"]])
+        used = {c: info for c, info in all_codes.items() if info.get("used_by") == target_uid}
+        if not used:
+            return await styled_reply(event, f"{PE} <b>{bs('No codes used by this user')}</b>", emoji_ids=[CE["warn"]])
+        try:
+            entity = await client_instance.get_entity(target_uid)
+            name = entity.first_name or str(target_uid)
+        except:
+            name = str(target_uid)
+        msg = f"{PE} <b>{bs('Codes used by')} {name}</b> ({len(used)})\n<b>━━━━━━━━━━━━━━━━━</b>\n"
+        eid = [CE["fire"], CE["fire"]]
+        for code, info in used.items():
+            used_at = info.get("used_at", "?")
+            msg += f"{PE} <code>{code}</code> → <code>{used_at}</code>\n"
+            eid.append(CE["link"])
+        await styled_reply(event, msg, emoji_ids=eid)
+    
+    else:
+        # assume it's a code
+        code = arg.strip()
+        info = get_code_info(code)
+        if not info:
+            return await styled_reply(event, f"{PE} <b>{bs('Code not found')}</b>", emoji_ids=[CE["cross"]])
+        if info.get("used", False):
+            user_id = info.get("used_by", "?")
+            used_at = info.get("used_at", "?")
+            try:
+                entity = await client_instance.get_entity(int(user_id))
+                name = entity.first_name or str(user_id)
+                mention = f"<a href='tg://user?id={user_id}'>{name}</a>"
+            except:
+                mention = f"<code>{user_id}</code>"
+            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> {bs('was used by')} {mention} {bs('on')} <code>{used_at}</code>"
+        else:
+            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> {bs('has not been used yet')}"
+        await styled_reply(event, msg, emoji_ids=[CE["info"]])
+
+
 # ====================== /status ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]status$'))
 async def status_cmd(event):
@@ -2269,7 +2513,7 @@ async def _handle_plan_assign(event, plan_key):
     current_plan = await get_user_plan(target_uid); is_upgrade = is_paid_plan(current_plan)
     await set_user_plan(target_uid, pi["tier"], pi["duration_days"])
     expiry_date = (datetime.now() + timedelta(days=pi["duration_days"])).strftime('%Y-%m-%d %H:%M:%S')
-    await styled_reply(event, f"""<b>✅ {bs('Plan Updated')}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('User')}</b> ↬ <a href='tg://user?id={target_uid}'>{target_name}</a>\n<a href='https://t.me/ravenu899'>⊀</a> <b>{bs('Plan')}</b> ↬ {pi['emoji']} <b>{pi['name']}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Duration')}</b> ↬ <code>{pi['duration_days']} {bs('days')}</code>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Expires')}</b> ↬ <code>{expiry_date}</code>""")
+    await styled_reply(event, f"""<b>✅ {bs('Plan Updated')}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('User')}</b> ↬ <a href='tg://user?id={target_uid}'>{target_name}</a>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Plan')}</b> ↬ {pi['emoji']} <b>{pi['name']}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Duration')}</b> ↬ <code>{pi['duration_days']} {bs('days')}</code>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Expires')}</b> ↬ <code>{expiry_date}</code>""")
     try:
         await styled_send(target_uid, f"""<b>🎉 {bs('Plan Upgraded!')} 🎉</b>\n{pi['emoji']} <b>{pi['name']}</b> ━ <code>{pi['duration_days']}d</code>\n{bs('Limit')}: {get_cc_limit(pi['tier'])} CCs\n{bs('Expires')}: {expiry_date}""")
     except: pass
@@ -2280,8 +2524,6 @@ async def _handle_plan_assign(event, plan_key):
     except: pass
 
 
-@client.on(events.NewMessage(pattern=r'(?i)^[/.]plan0\b'))
-async def plan0_cmd(event): await _handle_plan_assign(event, "plan0")
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]plan1\b'))
 async def plan1_cmd(event): await _handle_plan_assign(event, "plan1")
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]plan2\b'))
@@ -2313,15 +2555,25 @@ async def rplan_cmd(event):
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]planall$'))
 async def planall_cmd(event):
     if event.sender_id not in ADMIN_ID: return
+    # --- FIXED: using helper functions instead of raw db access ---
     all_users = []
-    for tier in PAID_TIERS:
-        async for u in db["users"].find({"plan": tier}): all_users.append(u)
+    premium_users = await get_all_premium_users()
+    for pu in premium_users:
+        uid2 = pu['user_id']
+        info = await get_user_info(uid2)
+        all_users.append({
+            'user_id': uid2,
+            'plan': info.get('plan', '?'),
+            'expiry': info.get('expiry')
+        })
     if not all_users: return await styled_reply(event, f"{PE} <b>{bs('No active plans')}</b>", emoji_ids=[CE["warn"]])
     fn = f"plans_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     content = f"ACTIVE PLANS ({len(all_users)})\n{'='*40}\n"
     for u in all_users:
-        uid2 = u.get("user_id", "?"); tier = u.get("plan", "?")
-        exp = u.get("expiry"); es = exp.strftime('%Y-%m-%d') if exp else "?"
+        uid2 = u.get("user_id", "?")
+        tier = u.get("plan", "?")
+        exp = u.get("expiry")
+        es = exp.strftime('%Y-%m-%d') if exp else "?"
         try: ent = await client_instance.get_entity(uid2); un = getattr(ent, 'first_name', None) or "?"
         except: un = "?"
         content += f"{un} | {uid2} | {tier} | {es}\n"
@@ -2332,96 +2584,6 @@ async def planall_cmd(event):
     except: pass
 
 
-# ====================== REDEEM SYSTEM ======================
-@client.on(events.NewMessage(pattern=r'(?i)^[/.]gencode\b'))
-async def gen_code_cmd(event):
-    if event.sender_id not in ADMIN_ID:
-        return
-    parts = event.raw_text.split()
-    if len(parts) < 2:
-        return await styled_reply(event, f"Usage: /gencode <plan_key> [count]", emoji_ids=[CE["info"]])
-    plan_key = parts[1].lower()
-    count = 1
-    if len(parts) >= 3:
-        try:
-            count = int(parts[2])
-            count = max(1, min(count, 50))
-        except:
-            pass
-    if plan_key not in PLANS:
-        return await styled_reply(event, f"Invalid plan key. Available: {', '.join(PLANS.keys())}", emoji_ids=[CE["cross"]])
-    codes = await generate_plan_code(plan_key, count)
-    codes_text = "\n".join(codes)
-    if len(codes_text) > 4000:
-        fn = f"codes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        async with aiofiles.open(fn, 'w') as f:
-            await f.write(codes_text)
-        await styled_send(event.chat_id, f"Generated {len(codes)} codes for {PLANS[plan_key]['name']}", file=fn)
-        try:
-            os.remove(fn)
-        except:
-            pass
-    else:
-        await styled_reply(event, f"Generated {len(codes)} codes for {PLANS[plan_key]['name']}:\n<code>{codes_text}</code>", emoji_ids=[CE["check"]])
-
-
-@client.on(events.NewMessage(pattern=r'(?i)^[/.]codes$'))
-async def list_codes_cmd(event):
-    if event.sender_id not in ADMIN_ID:
-        return
-    codes = await get_all_active_codes()
-    if not codes:
-        return await styled_reply(event, "No active codes.", emoji_ids=[CE["warn"]])
-    text = f"Active Codes ({len(codes)}):\n"
-    for code, info in list(codes.items())[:50]:
-        plan_key = info.get('plan')
-        plan_name = PLANS.get(plan_key, {}).get('name', plan_key)
-        text += f"<code>{code}</code> - {plan_name}\n"
-    if len(codes) > 50:
-        text += f"\n+{len(codes)-50} more"
-    await styled_reply(event, text, emoji_ids=[CE["info"]])
-
-
-@client.on(events.NewMessage(pattern=r'(?i)^[/.]delcode\b'))
-async def del_code_cmd(event):
-    if event.sender_id not in ADMIN_ID:
-        return
-    parts = event.raw_text.split()
-    if len(parts) < 2:
-        return await styled_reply(event, "Usage: /delcode <code>", emoji_ids=[CE["info"]])
-    code = parts[1].strip()
-    if await remove_code(code):
-        await styled_reply(event, f"Deleted code: <code>{code}</code>", emoji_ids=[CE["check"]])
-    else:
-        await styled_reply(event, "Code not found or already used.", emoji_ids=[CE["cross"]])
-
-
-@client.on(events.NewMessage(pattern=r'(?i)^[/.]redeem\b'))
-async def redeem_cmd(event):
-    if await check_maintenance(event): return
-    if not await force_join_check(event): return
-    if await is_banned_user(event.sender_id):
-        t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
-    parts = event.raw_text.split()
-    if len(parts) < 2:
-        return await styled_reply(event, "Usage: /redeem <code>", emoji_ids=[CE["info"]])
-    code = parts[1].strip()
-    success, status, plan_key = await redeem_plan_code(event.sender_id, code)
-    if success:
-        plan_name = PLANS.get(plan_key, {}).get('name', plan_key)
-        await styled_reply(event, f"✅ Code redeemed successfully!\nYou now have <b>{plan_name}</b> plan.", emoji_ids=[CE["check"]])
-    else:
-        if status == "invalid":
-            await styled_reply(event, "❌ Invalid code.", emoji_ids=[CE["cross"]])
-        elif status == "used":
-            await styled_reply(event, "❌ Code already used.", emoji_ids=[CE["cross"]])
-        elif status == "has_plan":
-            await styled_reply(event, "❌ You already have an active plan.", emoji_ids=[CE["cross"]])
-        else:
-            await styled_reply(event, f"❌ {status}", emoji_ids=[CE["cross"]])
-
-
-# ====================== /stats ======================
 @client.on(events.NewMessage(pattern=r'(?i)^[/.]stats$'))
 async def stats_cmd(event):
     if event.sender_id not in ADMIN_ID: return
@@ -2439,6 +2601,333 @@ async def stats_cmd(event):
 {PE} <b>{bs('MRZ Active')}:</b> <code>{len(ACTIVE_MRZ_PROCESSES)}</code> ({MRZ_PER_USER_WORKERS}w)""", emoji_ids=[CE["fire"], CE["fire"], CE["chart"], CE["link"], CE["gem"], CE["brain"], CE["shield"]])
     except Exception as e:
         await styled_reply(event, f"{PE} <b>{bs('Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
+
+
+# ====================== /allhits & /myhits ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]allhits(?:\s+(\d+))?$'))
+async def allhits_cmd(event):
+    if event.sender_id not in ADMIN_ID: return
+    match = re.search(r'(?i)^[/.]allhits(?:\s+(\d+))?$', event.raw_text)
+    target_uid = match.group(1) if match and match.group(1) else None
+
+    lm = await styled_reply(event,
+        f"{PE} <b>{bs('Fetching Hits...')}</b>",
+        emoji_ids=[CE["search"]])
+
+    try:
+        if target_uid:
+            hits = await get_user_hits(int(target_uid))
+            title = f"{bs('Hits for User')} {target_uid}"
+        else:
+            hits = await get_all_hits()
+            title = bs('All Hits')
+
+        if not hits:
+            return await styled_edit(lm,
+                f"{PE} <b>{bs('No hits found')}</b>",
+                emoji_ids=[CE["warn"]])
+
+        charged = [c for c in hits if c.get('status', '').upper() == 'CHARGED']
+        approved = [c for c in hits if c.get('status', '').upper() == 'APPROVED']
+
+        lines = []
+        for c in hits:
+            uid_tag = f" [{c.get('user_id','?')}]" if not target_uid else ""
+            lines.append(f"{c.get('card','?')} | {c.get('status','?')} | {c.get('gateway','?')} | {c.get('response','?')[:60]}{uid_tag}")
+
+        content = "\n".join(lines)
+        import io
+        fname = f"hits_{target_uid or 'all'}_{int(time.time())}.txt"
+        fpath = f"/tmp/{fname}"
+        with open(fpath, 'w', encoding='utf-8') as f:
+            f.write(f"# {title}\n")
+            f.write(f"# Total: {len(hits)} | Charged: {len(charged)} | Approved: {len(approved)}\n\n")
+            f.write(content)
+
+        try: await lm.delete()
+        except: pass
+
+        caption = (
+            f"{PE} <b>{title}</b> {PE}\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+            f"{PE} <b>{bs('Total')}:</b> <code>{len(hits)}</code>\n"
+            f"{PE} <b>{bs('Charged')}:</b> <code>{len(charged)}</code>\n"
+            f"{PE} <b>{bs('Approved')}:</b> <code>{len(approved)}</code>\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>"
+        )
+        await client_instance.send_file(
+            event.chat_id, fpath,
+            caption=caption,
+            parse_mode='html',
+            reply_to=event.id
+        )
+        import os as _os
+        try: _os.remove(fpath)
+        except: pass
+    except Exception as e:
+        await styled_edit(lm, f"{PE} <b>{bs('Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
+
+
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]myhits$'))
+async def myhits_cmd(event):
+    if await check_maintenance(event): return
+    if not await force_join_check(event): return
+    if await is_banned_user(event.sender_id):
+        t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
+    uid = event.sender_id
+
+    lm = await styled_reply(event,
+        f"{PE} <b>{bs('Fetching your hits...')}</b>",
+        emoji_ids=[CE["search"]])
+
+    try:
+        hits = await get_user_hits(uid)
+        if not hits:
+            return await styled_edit(lm,
+                f"{PE} <b>{bs('No hits found')}</b>\n"
+                f"{PE} <i>{bs('You have no charged/approved cards yet.')}</i>",
+                emoji_ids=[CE["warn"], CE["info"]])
+
+        charged = [c for c in hits if c.get('status', '').upper() == 'CHARGED']
+        approved = [c for c in hits if c.get('status', '').upper() == 'APPROVED']
+
+        lines = [c.get('card', '?') for c in hits]
+        fname = f"myhits_{uid}_{int(time.time())}.txt"
+        fpath = f"/tmp/{fname}"
+        with open(fpath, 'w', encoding='utf-8') as f:
+            f.write(f"# My Hits\n")
+            f.write(f"# Total: {len(hits)} | Charged: {len(charged)} | Approved: {len(approved)}\n\n")
+            f.write("\n".join(lines))
+
+        try: await lm.delete()
+        except: pass
+
+        caption = (
+            f"{PE} <b>{bs('My Hits')}</b> {PE}\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+            f"{PE} <b>{bs('Total')}:</b> <code>{len(hits)}</code>\n"
+            f"{PE} <b>{bs('Charged')}:</b> <code>{len(charged)}</code>\n"
+            f"{PE} <b>{bs('Approved')}:</b> <code>{len(approved)}</code>\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>"
+        )
+        await client_instance.send_file(
+            event.chat_id, fpath,
+            caption=caption,
+            parse_mode='html',
+            reply_to=event.id
+        )
+        import os as _os
+        try: _os.remove(fpath)
+        except: pass
+    except Exception as e:
+        await styled_edit(lm, f"{PE} <b>{bs('Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
+
+
+# ====================== /broadcast ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]broadcast\b'))
+async def broadcast_cmd(event):
+    if event.sender_id not in ADMIN_ID: return
+    cmd_text = re.sub(r'^[/.]broadcast\s*', '', event.raw_text, flags=re.IGNORECASE).strip()
+    reply_msg = None
+    if event.reply_to_msg_id:
+        reply_msg = await event.get_reply_message()
+    elif not cmd_text:
+        return await styled_reply(event,
+            f"{PE} <b>{bs('Broadcast Usage')}</b> {PE}\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+            f"{PE} <code>/broadcast &lt;message&gt;</code>\n"
+            f"{PE} <b>Or reply to a message with</b> <code>/broadcast</code>\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+            f"{PE} <i>{bs('Sends message to ALL users')}</i>",
+            emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["link"], CE["warn"]])
+    total_users = await get_total_users()
+    sm = await styled_reply(event,
+        f"{PE} <b>{bs('Broadcasting...')}</b>\n"
+        f"{PE} <b>{bs('Total Users')}:</b> <code>{total_users}</code>\n"
+        f"{PE} <i>{bs('Please wait...')}</i>",
+        emoji_ids=[CE["fire"], CE["chart"], CE["info"]])
+    sent = 0
+    failed = 0
+    blocked = 0
+    try:
+        all_user_ids = await get_all_user_ids()
+    except Exception as e:
+        return await styled_edit(sm, f"{PE} <b>{bs('DB Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
+    for uid in all_user_ids:
+        try:
+            if reply_msg:
+                await client_instance.forward_messages(uid, reply_msg)
+            else:
+                await styled_send(uid,
+                    f"{PE} <b>{bs('Announcement')}</b> {PE}\n"
+                    f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+                    f"{cmd_text}\n"
+                    f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+                    f"{PE} <i>- {bs('Admin')}</i>",
+                    emoji_ids=[CE["fire"], CE["fire"], CE["info"]])
+            sent += 1
+        except Exception as e:
+            err = str(e).lower()
+            if any(k in err for k in ['blocked', 'deactivated', 'not found', 'user_deactivated', 'peer_id_invalid']):
+                blocked += 1
+            else:
+                failed += 1
+        await asyncio.sleep(0.05)
+    await styled_edit(sm,
+        f"{PE} <b>{bs('Broadcast Complete')}</b> {PE}\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <b>{bs('Sent')}:</b> <code>{sent}</code>\n"
+        f"{PE} <b>{bs('Blocked')}:</b> <code>{blocked}</code>\n"
+        f"{PE} <b>{bs('Failed')}:</b> <code>{failed}</code>\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <b>{bs('Total')}:</b> <code>{sent + blocked + failed}</code>",
+        emoji_ids=[CE["check"], CE["check"], CE["chart"], CE["warn"], CE["cross"], CE["star"]])
+
+
+# ====================== /fb (Feedback) ======================
+_PENDING_FB = {}
+
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]fb$'))
+async def fb_cmd(event):
+    if await check_maintenance(event): return
+    if not await force_join_check(event): return
+    if await is_banned_user(event.sender_id):
+        t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
+    uid = event.sender_id
+    _PENDING_FB[uid] = True
+    await styled_reply(event,
+        f"{PE} <b>{bs('Send Your Feedback')}</b> {PE}\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <i>{bs('Share your bot experience or suggestions')}</i>\n"
+        f"{PE} <i>{bs('Type your message now...')}</i>\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <code>/cancel</code> {bs('to cancel')}",
+        emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["eyes"], CE["stop"]])
+
+
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]cancel$'))
+async def cancel_fb_cmd(event):
+    uid = event.sender_id
+    if uid in _PENDING_FB:
+        del _PENDING_FB[uid]
+        await styled_reply(event, f"{PE} <b>{bs('Cancelled')}</b>", emoji_ids=[CE["check"]])
+
+
+@client.on(events.NewMessage(
+    func=lambda e: e.is_private and not e.via_bot_id
+        and (not e.text or (not e.text.startswith('/') and not e.text.startswith('.')))
+))
+async def handle_feedback_text(event):
+    uid = event.sender_id
+    
+    # Auto-forward photos (Option B) if not in pending FB
+    if uid not in _PENDING_FB:
+        if event.photo:
+            try:
+                sender = await event.get_sender()
+                uname = f"@{sender.username}" if sender.username else f"<a href='tg://user?id={uid}'>{sender.first_name}</a>"
+            except:
+                uname = f"<code>{uid}</code>"
+            
+            caption = event.text or ""
+            msg_text = f"{PE} <b>{bs('Hit Screenshot')}</b> {PE}\n<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n{PE} <b>{bs('From')}:</b> {uname} (<code>{uid}</code>)\n"
+            if caption:
+                msg_text += f"<blockquote>{caption}</blockquote>\n"
+            
+            for admin_id in ADMIN_ID:
+                try:
+                    await client_instance.send_message(admin_id, msg_text, file=event.photo, parse_mode='html')
+                except: pass
+            try:
+                await client_instance.send_message(SS_CHANNEL_ID, msg_text, file=event.photo, parse_mode='html')
+            except: pass
+            
+            await styled_reply(event, f"{PE} <b>{bs('Screenshot Sent!')}</b>", emoji_ids=[CE["check"]])
+        return
+
+    # Handle /fb input (Option C)
+    del _PENDING_FB[uid]
+    fb_text = event.text or ""
+    
+    if not fb_text and not event.photo:
+        return await styled_reply(event, f"{PE} <b>{bs('Empty feedback')}</b>", emoji_ids=[CE["warn"]])
+        
+    await styled_reply(event,
+        f"{PE} <b>{bs('Feedback Sent!')}</b> {PE}\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <i>{bs('Thank you for your feedback!')}</i>\n"
+        f"{PE} <i>{bs('We will review it soon.')}</i>",
+        emoji_ids=[CE["check"], CE["check"], CE["gift"], CE["info"]])
+        
+    try:
+        sender = await event.get_sender()
+        uname = f"@{sender.username}" if sender.username else f"<a href='tg://user?id={uid}'>{sender.first_name}</a>"
+    except:
+        uname = f"<code>{uid}</code>"
+        
+    msg_text = (
+        f"{PE} <b>{bs('New Feedback')}</b> {PE}\n"
+        f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+        f"{PE} <b>{bs('From')}:</b> {uname} (<code>{uid}</code>)\n"
+    )
+    if fb_text:
+        msg_text += f"{PE} <b>{bs('Message')}:</b>\n<blockquote>{fb_text}</blockquote>\n"
+    msg_text += f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n{PE} <i>{bs('Bot Experience Feedback')}</i>"
+    
+    for admin_id in ADMIN_ID:
+        try:
+            if event.photo:
+                await client_instance.send_message(admin_id, msg_text, file=event.photo, parse_mode='html')
+            else:
+                await styled_send(admin_id, msg_text, emoji_ids=[CE["fire"], CE["fire"], CE["link"], CE["info"], CE["eyes"]])
+        except: pass
+        
+    try:
+        log_text = f"{PE} <b>{bs('Feedback')}</b>\n{PE} {uname} (<code>{uid}</code>):\n"
+        if fb_text: log_text += f"<blockquote>{fb_text}</blockquote>"
+        if event.photo:
+            await client_instance.send_message(LOG_CHANNEL_ID, log_text, file=event.photo, parse_mode='html')
+        else:
+            await styled_send(LOG_CHANNEL_ID, log_text, emoji_ids=[CE["eyes"], CE["link"]])
+    except: pass
+
+
+# ====================== /ss (Screenshot Submit) ======================
+@client.on(events.NewMessage(pattern=r'(?i)^[/.]ss\b'))
+async def ss_cmd(event):
+    if await check_maintenance(event): return
+    if not await force_join_check(event): return
+    uid = event.sender_id
+    
+    reply_msg = await event.get_reply_message()
+    if not reply_msg or not reply_msg.photo:
+        return await styled_reply(event, 
+            f"{PE} <b>{bs('Screenshot Submit')}</b> {PE}\n"
+            f"<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n"
+            f"{PE} <i>{bs('Reply to a photo with')}</i> <code>/ss</code>\n"
+            f"{PE} <i>{bs('to send your hit screenshot to admin')}</i>",
+            emoji_ids=[CE["fire"], CE["fire"], CE["info"], CE["warn"]])
+            
+    try:
+        sender = await event.get_sender()
+        uname = f"@{sender.username}" if sender.username else f"<a href='tg://user?id={uid}'>{sender.first_name}</a>"
+    except:
+        uname = f"<code>{uid}</code>"
+        
+    caption = re.sub(r'^[/.]ss\s*', '', event.raw_text, flags=re.IGNORECASE).strip()
+    msg_text = f"{PE} <b>{bs('Hit Screenshot')}</b> {PE}\n<b>\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501</b>\n{PE} <b>{bs('From')}:</b> {uname} (<code>{uid}</code>)\n"
+    if caption:
+        msg_text += f"<blockquote>{caption}</blockquote>\n"
+        
+    for admin_id in ADMIN_ID:
+        try:
+            await client_instance.send_message(admin_id, msg_text, file=reply_msg.photo, parse_mode='html')
+        except: pass
+    try:
+        await client_instance.send_message(SS_CHANNEL_ID, msg_text, file=reply_msg.photo, parse_mode='html')
+    except: pass
+    
+    await styled_reply(event, f"{PE} <b>{bs('Screenshot Sent!')}</b>", emoji_ids=[CE["check"]])
 
 
 # ====================== MAIN ======================
