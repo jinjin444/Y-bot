@@ -679,7 +679,7 @@ def format_card_result(status, card, gateway, response, price="-", site="-", bin
     ps = str(price).replace('$', '').strip() if price and price != "-" else "-"
     return f"""{h}
 <b>━━━━━━━━━━━━━━━━━</b>
-<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Card')}</b>
+<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Card')}</b>
 ⤷ <code>{card}</code>
 <b>{bs('Gateway')}</b> ━ <code>{gateway}</code>
 <b>{bs('Response')}</b> ━ <code>{response}</code>
@@ -703,7 +703,7 @@ def format_card_result_no_price(status, card, gateway, response, bin_info=None, 
     bi = bin_info or {"brand": "-", "type": "-", "level": "-", "bank": "-", "country": "-", "flag": "🏳️"}
     return f"""{h}
 <b>━━━━━━━━━━━━━━━━━</b>
-<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Card')}</b>
+<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Card')}</b>
 ⤷ <code>{card}</code>
 <b>{bs('Gateway')}</b> ━ <code>{gateway}</code>
 <b>{bs('Response')}</b> ━ <code>{response}</code>
@@ -727,7 +727,7 @@ def format_simple_card_result(status, card, gateway, response, bin_info=None, el
     el = f"\n<b>{bs(extra_field[0])}</b> ━ <code>{extra_field[1]}</code>" if extra_field else ""
     return f"""{h}
 <b>━━━━━━━━━━━━━━━━━</b>
-<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Card')}</b>
+<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Card')}</b>
 ⤷ <code>{card}</code>
 <b>{bs('Gateway')}</b> ━ <code>{gateway}</code>
 <b>{bs('Response')}</b> ━ <code>{response}</code>{el}
@@ -750,7 +750,7 @@ def format_rz_single_result(status, card, gateway, response, bin_info=None, elap
     bi = bin_info or {"brand": "-", "type": "-", "level": "-", "bank": "-", "country": "-", "flag": "🏳️"}
     return f"""{h}
 <b>━━━━━━━━━━━━━━━━━</b>
-<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Card')}</b>
+<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Card')}</b>
 ⤷ <code>{card}</code>
 <b>{bs('Gateway')}</b> ━ <code>{gateway}</code>
 <b>{bs('Response')}</b> ━ <code>{response}</code>
@@ -894,7 +894,7 @@ async def send_premium_only_message(event):
     return await styled_reply(event, f"""{PE} <b>{bs('Premium Only')}</b> {PE}
 <b>━━━━━━━━━━━━━━━━━</b>
 {PE} <b>{bs('This feature requires an active plan')}</b>
-{PE} <i>{bs('Use /plan to see available plans')}</i>""", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["stop"], CE["stop"], CE["warn"], CE["info"]])
+{PE} <i>{bs('Use /plan to see available plans')}</i>""", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/meowmeow7070")]], emoji_ids=[CE["stop"], CE["stop"], CE["warn"], CE["info"]])
 
 
 def banned_user_message():
@@ -1340,7 +1340,7 @@ def _get_system_info():
 async def _build_status_text():
     sys_info = await asyncio.get_event_loop().run_in_executor(None, _get_system_info)
     if sys_info.get("error"):
-        return f"⌬ <b>𝐄𝐫𝐫𝐨𝐫</b> ↬ <code>❌ {sys_info['error']}</code>\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/Mydev1'>𝑹@𝒗𝒆𝒏</a>"
+        return f"⌬ <b>𝐄𝐫𝐫𝐨𝐫</b> ↬ <code>❌ {sys_info['error']}</code>\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/meowmeow7070'>𝑹@𝒗𝒆𝒏</a>"
     os_v = sys_info["os_version"].split("-")[0] if "-" in sys_info["os_version"] else sys_info["os_version"]
     s = sys_info
     msg = (
@@ -1358,7 +1358,7 @@ async def _build_status_text():
     )
     if s["cpu_critical"] or s["memory_critical"] or s["disk_critical"]:
         msg += "\n⚠️ <b>Warning:</b> System resources critically low!"
-    msg += f"\n――――――――――――――\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/Mydev1'>𝑹@Mydev1</a>"
+    msg += f"\n――――――――――――――\n⌬ <b>𝐁𝐨𝐭 𝐁𝐲</b> ↬ <a href='https://t.me/meowmeow7070'>𝑹@Mydev1</a>"
     return msg
 
 
@@ -1457,7 +1457,7 @@ async def start(event):
 |   {PE} <code>/myhits</code> ━ <b>{bs('My Hit Cards')}</b>
 <b>━━━━━━━━━━━━━━━━━</b>
 {sl}"""
-        kb = [[pbtn(bs("Plans"), data="show_plans"), pbtn(bs("Support"), url="https://t.me/Mydev1")],
+        kb = [[pbtn(bs("Plans"), data="show_plans"), pbtn(bs("Support"), url="https://t.me/meowmeow7070")],
               [pbtn(bs("Channel"), url=JOIN_CHANNEL_LINK), pbtn(bs("Group"), url=JOIN_GROUP_LINK)]]
         # Emoji IDs: adjust based on which sections are shown
         ei = [CE["bolt"], CE["search"], CE["pin"], CE["fire"], CE["search"], CE["pin"], CE["brain"], CE["plus"], CE["cross"], CE["globe"], CE["link"], CE["shield"], CE["link"], CE["eyes"], CE["tick"], CE["trash"], CE["info"], CE["info"]] + se
@@ -1489,7 +1489,7 @@ async def plans_cb(event):
     for pid, pi in PLANS.items():
         plans_text += f"\n{pi['emoji']} <b>{pi['name']}</b> ━ <b>{pi['duration_days']}{bs('d')}</b> ━ <b>{pi['price']}</b>"
     plans_text += f"\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Current')}:</b> <b>{cp.upper()}</b>"
-    await styled_send(event.chat_id, plans_text, buttons=[[pbtn(bs("Redeem Code"), data="show_redeem"), pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
+    await styled_send(event.chat_id, plans_text, buttons=[[pbtn(bs("Redeem Code"), data="show_redeem"), pbtn(bs("Upgrade"), url="https://t.me/meowmeow7070")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
 
 
 @client.on(events.CallbackQuery(data=b"show_redeem"))
@@ -1510,7 +1510,7 @@ async def show_plans(event):
     for pid, pi in PLANS.items():
         plans_text += f"\n{pi['emoji']} <b>{pi['name']}</b> ━ <b>{pi['duration_days']}{bs('d')}</b> ━ <b>{pi['price']}</b>"
     plans_text += f"""\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Current')}:</b> <b>{cp.upper()}</b>\n{PE} <i>{bs('Contact admin')}</i>"""
-    await styled_reply(event, plans_text, buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1"), pbtn(bs("Redeem Code"), data="show_redeem")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
+    await styled_reply(event, plans_text, buttons=[[pbtn(bs("Upgrade"), url="https://t.me/meowmeow7070"), pbtn(bs("Redeem Code"), data="show_redeem")]], emoji_ids=[CE["fire"], CE["fire"], CE["crown"]])
 
 
 # ====================== /info (FIXED) ======================
@@ -1899,11 +1899,11 @@ async def _check_free_limits(event, uid, plan, is_group):
         if not is_group: await send_group_only_message(event); return False
         used = get_free_sp_usage(uid)
         if used >= FREE_SP_DAILY_LIMIT:
-            await styled_reply(event, f"{PE} <b>{bs('Daily Limit')}</b> {used}/{FREE_SP_DAILY_LIMIT}", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]], emoji_ids=[CE["stop"]])
+            await styled_reply(event, f"{PE} <b>{bs('Daily Limit')}</b> {used}/{FREE_SP_DAILY_LIMIT}", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/meowmeow7070")]], emoji_ids=[CE["stop"]])
             return False
         cd = get_free_sp_cooldown_remaining(uid)
         if cd > 0:
-            await styled_reply(event, f"⚠️ <b>{bs('Wait')} {cd}{bs('s')}</b>", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/Mydev1")]])
+            await styled_reply(event, f"⚠️ <b>{bs('Wait')} {cd}{bs('s')}</b>", buttons=[[pbtn(bs("Upgrade"), url="https://t.me/meowmeow7070")]])
             return False
     return True
 
@@ -2533,7 +2533,7 @@ async def _handle_plan_assign(event, plan_key):
     current_plan = await get_user_plan(target_uid); is_upgrade = is_paid_plan(current_plan)
     await set_user_plan(target_uid, pi["tier"], pi["duration_days"])
     expiry_date = (datetime.now() + timedelta(days=pi["duration_days"])).strftime('%Y-%m-%d %H:%M:%S')
-    await styled_reply(event, f"""<b>✅ {bs('Plan Updated')}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('User')}</b> ↬ <a href='tg://user?id={target_uid}'>{target_name}</a>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Plan')}</b> ↬ {pi['emoji']} <b>{pi['name']}</b>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Duration')}</b> ↬ <code>{pi['duration_days']} {bs('days')}</code>\n<a href='https://t.me/Mydev1'>⊀</a> <b>{bs('Expires')}</b> ↬ <code>{expiry_date}</code>""")
+    await styled_reply(event, f"""<b>✅ {bs('Plan Updated')}</b>\n<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('User')}</b> ↬ <a href='tg://user?id={target_uid}'>{target_name}</a>\n<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Plan')}</b> ↬ {pi['emoji']} <b>{pi['name']}</b>\n<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Duration')}</b> ↬ <code>{pi['duration_days']} {bs('days')}</code>\n<a href='https://t.me/meowmeow7070'>⊀</a> <b>{bs('Expires')}</b> ↬ <code>{expiry_date}</code>""")
     try:
         await styled_send(target_uid, f"""<b>🎉 {bs('Plan Upgraded!')} 🎉</b>\n{pi['emoji']} <b>{pi['name']}</b> ━ <code>{pi['duration_days']}d</code>\n{bs('Limit')}: {get_cc_limit(pi['tier'])} CCs\n{bs('Expires')}: {expiry_date}""")
     except: pass
