@@ -6,7 +6,7 @@ import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # MongoDB Connection
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://Tyr6hij")
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb.net/?appName=Cluster0")
 USE_MONGODB = os.environ.get("USE_MONGODB", "false").lower() == "true"
 
 # MongoDB Client

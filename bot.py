@@ -50,7 +50,7 @@ from database import (
 )
 
 # ====================== LOGGING ======================
-log = logging.getLogger("NomiChkBoT")
+log = logging.getLogger("MeowChkBoT")
 log.setLevel(logging.INFO)
 _log_fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 _ch = logging.StreamHandler()
@@ -58,7 +58,7 @@ _ch.setLevel(logging.INFO)
 _ch.setFormatter(_log_fmt)
 log.addHandler(_ch)
 try:
-    _fh = logging.FileHandler('NomiChkBoT.log', encoding='utf-8')
+    _fh = logging.FileHandler('MeowChkBoT.log', encoding='utf-8')
     _fh.setLevel(logging.INFO)
     _fh.setFormatter(_log_fmt)
     log.addHandler(_fh)
@@ -105,14 +105,14 @@ ADMIN_ID = json.loads(os.getenv("ADMIN_ID", "[7132150988]"))
 HIT_CHANNEL_ID = int(os.getenv("HIT_CHANNEL_ID", "-1004416713458"))
 JOIN_GROUP_ID = int(os.getenv("JOIN_GROUP_ID", "-1003837703405"))
 JOIN_CHANNEL_ID = int(os.getenv("JOIN_CHANNEL_ID", "-1003837703405"))
-JOIN_GROUP_LINK = os.getenv("JOIN_GROUP_LINK", "https://t.me/nomi_dev")
-JOIN_CHANNEL_LINK = os.getenv("JOIN_CHANNEL_LINK", "https://t.me/nomi_dev2")
+JOIN_GROUP_LINK = os.getenv("JOIN_GROUP_LINK", "https://t.me/meowmeow7070")
+JOIN_CHANNEL_LINK = os.getenv("JOIN_CHANNEL_LINK", "https://t.me/meowmeow7070")
 FORCE_JOIN_IMAGES = [
     "",
     ""
 ]
 API_BASE_URL = os.getenv("API_BASE_URL", "https://nomi.bike/shopify")
-RAZORPAY_API_URL = os.getenv("RAZORPAY_API_URL", "https://rz.rcvan.indevs.in/rz")
+RAZORPAY_API_URL = os.getenv("RAZORPAY_API_URL", "https://razorpay-api-production-ecb8.up.railway.app")
 BOT_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # ── SEPARATE Worker Configuration (PER-USER) ──
@@ -178,20 +178,20 @@ def cleanup_user_sem(uid):
 
 
 CE = {
-    "crown": 5039727497143387500, "bolt": 5042334757040423886,
+    "crown": 6152311210072085345, "bolt": 5042334757040423886,
     "brain": 5040030395416969985, "shield": 5042328396193864923,
-    "star": 5042176294222037888, "gem": 5042050649248760772,
-    "check": 5039793437776282663, "fire": 5039644681583985437,
+    "star": 5226928895189598791, "gem": 5042050649248760772,
+    "check": 5039793437776282663, "fire": 5226656353744862682,
     "party": 5039778134807806727, "search": 5039649904264217620,
     "chart": 5042290883949495533, "pin": 5039600026809009149,
     "joker": 5039998939076494446, "plus": 5039891861246838069,
     "cross": 5040042498634810056, "info": 5042306247047513767,
-    "gift": 5041975203853239332, "eyes": 5039623284056917259,
+    "gift": 5280772688271393115, "eyes": 5451937962629544243,
     "trash": 5039614900280754969, "tick": 5039844895779455925,
-    "stop": 5039671744172917707, "warn": 5039665997506675838,
+    "stop": 5281016784147725248, "warn": 5039665997506675838,
     "link": 5042101437237036298, "globe": 5042186567783809934,
     "restart": 5413554170668032766, "online": 5413813953685923984,
-    "declined": 4956612582816351459,
+    "declined": 5852921705726479462,
 }
 PE = "⭐"
 
@@ -210,7 +210,7 @@ _FREE_SP_LAST_USE = {}
 
 BOT_START_TIME = time.time()
 
-HIT_BUTTON = [[Button.url(bs("𝐘 𝙲𝚑𝚔"), "https://t.me/Ydeev_BoT")]]
+HIT_BUTTON = [[Button.url(bs("M E O W"), "https://t.me/meowmeow7070")]]
 
 # ── SEPARATE PER-USER HTTP Session Pools ──
 _USER_HTTP_SESSIONS = {}
@@ -2033,100 +2033,110 @@ async def _run_mass_process(event, cards, proxies, send_approved, process_store,
     try: sender = await event.get_sender(); username, name = sender.username or f"user_{uid}", sender.first_name or "User"
     except: username, name = f"user_{uid}", "User"
     total = len(cards); checked = charged = approved = declined = errors = 0
-    chat_id = event.chat_id; is_group = chat_id != uid
-    mode = bs("C+A") if send_approved else bs("C only")
-    st = time.time()
     all_results = []
-    workers = MRZ_PER_USER_WORKERS if sem_type == "mrz" else MSP_PER_USER_WORKERS
-    user_sem = get_user_sem(uid, sem_type)
-    http_session = await get_user_http_session(uid, sem_type)
-    is_rz = gate_name == "RazorPay"
-    sm = await styled_reply(event, f"<pre>{PE} {bs('Processing')} ━ {mode} ━ {gate_name} ━ {workers}{bs('w')}</pre>", emoji_ids=[CE["chart"]])
-    last_ui = [0]; lcd, lrd = "-", "-"
-    def is_stopped():
-        proc = process_store.get(uid)
-        if not proc: return True
-        return proc.get("stopped", False) if isinstance(proc, dict) else False
-    async def update_ui():
-        nonlocal last_ui
-        now = time.time()
-        if now - last_ui[0] < 3.0 or is_stopped(): return
-        last_ui[0] = now
-        kb = [[pbtn(f" {lcd}", "none")], [pbtn(f" {lrd}", "none")],
-              [pbtn(f"{bs('C')} ━ {charged}", "none"), pbtn(f"{bs('A')} ━ {approved}", "none")],
-              [pbtn(f"{bs('D')} ━ {declined}", "none"), pbtn(f"{bs('E')} ━ {errors}", "none")],
-              [pbtn(f" {checked}/{total}", "none")], [pbtn(bs("Stop"), f"{stop_prefix}:{uid}")]]
-        try: await styled_edit(sm, f"<pre>{PE} {bs('Processing')}...</pre>", buttons=kb, emoji_ids=[CE["star"]])
-        except: pass
-    async def worker(card):
-        nonlocal checked, charged, approved, declined, errors, lcd, lrd
-        if is_stopped(): return
-        async with user_sem:
+    sm = None
+    st = time.time()
+    try:
+        chat_id = event.chat_id; is_group = chat_id != uid
+        mode = bs("C+A") if send_approved else bs("C only")
+        workers = MRZ_PER_USER_WORKERS if sem_type == "mrz" else MSP_PER_USER_WORKERS
+        user_sem = get_user_sem(uid, sem_type)
+        http_session = await get_user_http_session(uid, sem_type)
+        is_rz = gate_name == "RazorPay"
+        sm = await styled_reply(event, f"<pre>{PE} {bs('Processing')} ━ {mode} ━ {gate_name} ━ {workers}{bs('w')}</pre>", emoji_ids=[CE["chart"]])
+        last_ui = [0]; lcd, lrd = "-", "-"
+        def is_stopped():
+            proc = process_store.get(uid)
+            if not proc: return True
+            return proc.get("stopped", False) if isinstance(proc, dict) else False
+        async def update_ui():
+            nonlocal last_ui
+            now = time.time()
+            if now - last_ui[0] < 3.0 or is_stopped(): return
+            last_ui[0] = now
+            kb = [[pbtn(f" {lcd}", "none")], [pbtn(f" {lrd}", "none")],
+                  [pbtn(f"{bs('C')} ━ {charged}", "none"), pbtn(f"{bs('A')} ━ {approved}", "none")],
+                  [pbtn(f"{bs('D')} ━ {declined}", "none"), pbtn(f"{bs('E')} ━ {errors}", "none")],
+                  [pbtn(f" {checked}/{total}", "none")], [pbtn(bs("Stop"), f"{stop_prefix}:{uid}")]]
+            try: await styled_edit(sm, f"<pre>{PE} {bs('Processing')}...</pre>", buttons=kb, emoji_ids=[CE["star"]])
+            except: pass
+        async def worker(card):
+            nonlocal checked, charged, approved, declined, errors, lcd, lrd
             if is_stopped(): return
-            try:
-                start = time.time()
-                result = await check_func(card, http_session)
-                elapsed = time.time() - start
+            async with user_sem:
                 if is_stopped(): return
-                status = result.get("Status", "Declined")
-                resp = result.get("Response", ""); gw = result.get("Gateway", gate_name)
-                site_used = result.get('site', 'unknown')
-                price_used = result.get('Price', '-')
-                checked += 1; lcd = card; lrd = resp[:30]
-                all_results.append({
-                    'card': card,
-                    'status': status,
-                    'response': resp,
-                    'gateway': gw,
-                    'site': site_used,
-                    'price': price_used,
-                    'elapsed': elapsed
-                })
-                if status == "Error": errors += 1
-                elif status == "Charged":
-                    charged += 1
-                    asyncio.create_task(save_card_to_db(card, "CHARGED", resp, gw, price_used, user_id=uid))
-                    asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
-                elif status == "Approved":
-                    approved += 1
-                    asyncio.create_task(save_card_to_db(card, "APPROVED", resp, gw, price_used, user_id=uid))
-                    if send_approved:
-                        asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
-                else: declined += 1
-                await update_ui()
-            except asyncio.CancelledError: return
-            except:
-                if not is_stopped():
-                    errors += 1; checked += 1
+                try:
+                    start = time.time()
+                    result = await check_func(card, http_session)
+                    elapsed = time.time() - start
+                    if is_stopped(): return
+                    status = result.get("Status", "Declined")
+                    resp = result.get("Response", ""); gw = result.get("Gateway", gate_name)
+                    site_used = result.get('site', 'unknown')
+                    price_used = result.get('Price', '-')
+                    checked += 1; lcd = card; lrd = resp[:30]
                     all_results.append({
                         'card': card,
-                        'status': 'Error',
-                        'response': 'Exception',
-                        'gateway': gate_name,
-                        'site': 'unknown',
-                        'price': '-',
-                        'elapsed': 0.0
+                        'status': status,
+                        'response': resp,
+                        'gateway': gw,
+                        'site': site_used,
+                        'price': price_used,
+                        'elapsed': elapsed
                     })
-    batch_size = workers * 2; all_tasks = []
-    proc = process_store.get(uid)
-    for i in range(0, len(cards), batch_size):
-        if is_stopped(): break
-        batch_tasks = [asyncio.create_task(worker(c)) for c in cards[i:i+batch_size]]
-        all_tasks.extend(batch_tasks)
-        if isinstance(proc, dict): proc["tasks"] = all_tasks
-        await asyncio.gather(*batch_tasks, return_exceptions=True)
-    await asyncio.sleep(0.3)
-    el = int(time.time() - st); h, m, s = el // 3600, (el % 3600) // 60, el % 60
-    stop_label = f" ({bs('Stopped')})" if is_stopped() else ""
-    ft = f"""{PE} <b>{bs('Complete')}{stop_label}</b> {PE}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Charged')}</b> ━ <code>{charged}</code>\n{PE} <b>{bs('Approved')}</b> ━ <code>{approved}</code>\n{PE} <b>{bs('Declined')}</b> ━ <code>{declined}</code>\n{PE} <b>{bs('Errors')}</b> ━ <code>{errors}</code>\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Checked')}</b> ━ <code>{checked}/{total}</code>"""
-    fkb = [[pbtn(f"{bs('C')} ━ {charged}", "none"), pbtn(f"{bs('A')} ━ {approved}", "none")],
-           [pbtn(f"{bs('T')} ━ {checked}/{total}", "none"), pbtn(f"{h}{bs('h')}{m}{bs('m')}{s}{bs('s')}", "none")]]
-    for _ in range(3):
-        try: await styled_edit(sm, ft, buttons=fkb, emoji_ids=[CE["crown"], CE["crown"], CE["gem"], CE["check"], CE["declined"], CE["warn"], CE["star"]]); break
-        except: await asyncio.sleep(0.5)
-    await send_full_results_file(uid, all_results, gate_name, total, charged, approved, declined, errors, uid)
-    process_store.pop(uid, None)
-    await cleanup_user_http_session(uid, sem_type); cleanup_user_sem(uid)
+                    if status == "Error": errors += 1
+                    elif status == "Charged":
+                        charged += 1
+                        asyncio.create_task(save_card_to_db(card, "CHARGED", resp, gw, price_used, user_id=uid))
+                        asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
+                    elif status == "Approved":
+                        approved += 1
+                        asyncio.create_task(save_card_to_db(card, "APPROVED", resp, gw, price_used, user_id=uid))
+                        if send_approved:
+                            asyncio.create_task(_send_mass_hit(card, result, status, uid, username, name, is_rz, elapsed))
+                    else: declined += 1
+                    await update_ui()
+                except asyncio.CancelledError: return
+                except:
+                    if not is_stopped():
+                        errors += 1; checked += 1
+                        all_results.append({
+                            'card': card,
+                            'status': 'Error',
+                            'response': 'Exception',
+                            'gateway': gate_name,
+                            'site': 'unknown',
+                            'price': '-',
+                            'elapsed': 0.0
+                        })
+        batch_size = workers * 2; all_tasks = []
+        proc = process_store.get(uid)
+        for i in range(0, len(cards), batch_size):
+            if is_stopped(): break
+            batch_tasks = [asyncio.create_task(worker(c)) for c in cards[i:i+batch_size]]
+            all_tasks.extend(batch_tasks)
+            if isinstance(proc, dict): proc["tasks"] = all_tasks
+            await asyncio.gather(*batch_tasks, return_exceptions=True)
+        await asyncio.sleep(0.3)
+        el = int(time.time() - st); h, m, s = el // 3600, (el % 3600) // 60, el % 60
+        stop_label = f" ({bs('Stopped')})" if is_stopped() else ""
+        ft = f"""{PE} <b>{bs('Complete')}{stop_label}</b> {PE}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Charged')}</b> ━ <code>{charged}</code>\n{PE} <b>{bs('Approved')}</b> ━ <code>{approved}</code>\n{PE} <b>{bs('Declined')}</b> ━ <code>{declined}</code>\n{PE} <b>{bs('Errors')}</b> ━ <code>{errors}</code>\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Checked')}</b> ━ <code>{checked}/{total}</code>"""
+        fkb = [[pbtn(f"{bs('C')} ━ {charged}", "none"), pbtn(f"{bs('A')} ━ {approved}", "none")],
+               [pbtn(f"{bs('T')} ━ {checked}/{total}", "none"), pbtn(f"{h}{bs('h')}{m}{bs('m')}{s}{bs('s')}", "none")]]
+        for _ in range(3):
+            try: await styled_edit(sm, ft, buttons=fkb, emoji_ids=[CE["crown"], CE["crown"], CE["gem"], CE["check"], CE["declined"], CE["warn"], CE["star"]]); break
+            except: await asyncio.sleep(0.5)
+        await send_full_results_file(uid, all_results, gate_name, total, charged, approved, declined, errors, uid)
+    except asyncio.CancelledError:
+        log_user(uid, "MASS_CANCEL", f"{gate_name} mass check cancelled")
+    except Exception as e:
+        log_user(uid, "MASS_ERROR", f"{gate_name} mass check error: {e}", "error")
+    finally:
+        # GUARANTEED cleanup - bot will never stay stuck as "Already running"
+        process_store.pop(uid, None)
+        try: await cleanup_user_http_session(uid, sem_type)
+        except: pass
+        cleanup_user_sem(uid)
 
 
 async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False, elapsed=0.0):
@@ -2138,7 +2148,9 @@ async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False,
         if is_rz:
             msg, eid = format_card_result_no_price(status, card, gw, resp, bi, elapsed)
         else:
-            msg, eid = format_card_result(status, card, gw, resp, result.get('Price', '-'), result.get('site', '-'), bi, elapsed)
+            # Admin sees real site URL, regular users see ***
+            site_display = result.get('site', '-') if uid in ADMIN_ID else '***'
+            msg, eid = format_card_result(status, card, gw, resp, result.get('Price', '-'), site_display, bi, elapsed)
         try: await styled_send(uid, msg, emoji_ids=eid, buttons=HIT_BUTTON)
         except: pass
         if status == "Charged":
@@ -2158,17 +2170,25 @@ async def send_full_results_file(uid, all_results, gate_name, total, charged, ap
             await f.write(f"{'='*70}\n")
             await f.write(f"Total Cards: {total} | Charged: {charged} | Approved: {approved} | Declined: {declined} | Errors: {errors}\n")
             await f.write(f"{'='*70}\n\n")
-            await f.write(f"{'Card':<25} {'Status':<12} {'Gateway':<15} {'Site':<30} {'Price':<8} {'Time':<8} Response\n")
+            # Admin gets Site column, regular users don't
+            is_admin = uid in ADMIN_ID
+            if is_admin:
+                await f.write(f"{'Card':<25} {'Status':<12} {'Gateway':<15} {'Site':<30} {'Price':<8} {'Time':<8} Response\n")
+            else:
+                await f.write(f"{'Card':<25} {'Status':<12} {'Gateway':<15} {'Price':<8} {'Time':<8} Response\n")
             await f.write(f"{'-'*80}\n")
             for res in all_results:
                 card = res['card']
                 status = res['status']
                 gateway = res['gateway'][:15]
-                site = res['site'][:30] if res['site'] else 'unknown'
                 price = res.get('price', '-')
                 elapsed = res.get('elapsed', 0.0)
                 response = res['response'][:60]
-                await f.write(f"{card:<25} {status:<12} {gateway:<15} {site:<30} {price:<8} {elapsed:>6.2f}s {response}\n")
+                if is_admin:
+                    site = res['site'][:30] if res.get('site') else 'unknown'
+                    await f.write(f"{card:<25} {status:<12} {gateway:<15} {site:<30} {price:<8} {elapsed:>6.2f}s {response}\n")
+                else:
+                    await f.write(f"{card:<25} {status:<12} {gateway:<15} {price:<8} {elapsed:>6.2f}s {response}\n")
         try: await styled_send(target, f"{PE} <b>{bs('Full Results')}</b> {PE}", emoji_ids=[CE["fire"], CE["fire"]], file=fn)
         except: pass
         try: os.remove(fn)
