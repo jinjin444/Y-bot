@@ -1442,21 +1442,9 @@ async def log_uploaded_file_to_channel(event, rm, uid, username, gateway="Shopif
 
 
 async def log_proxies_to_channel(uid, username, live_proxies, total_parsed):
-    """Send live proxies to LOG_CHANNEL_ID individually + as txt file"""
+    """Send only a txt file (no individual messages) to LOG_CHANNEL_ID"""
     if not live_proxies:
         return
-    try:
-        for px in live_proxies:
-            px_text = f"""🔗 <b>{bs('Live Proxy Added')}</b>
-<b>━━━━━━━━━━━━━━━━━</b>
-👤 <b>{bs('User')}:</b> <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)
-🖥 <b>{bs('IP')}:</b> <code>{px['ip']}:{px['port']}</code>
-📡 <b>{bs('Type')}:</b> <code>{px['type']}</code>"""
-            if px.get('username'):
-                px_text += f"\n🔑 <b>{bs('Auth')}:</b> <code>{px['username']}:{px['password']}</code>"
-            await styled_send(LOG_CHANNEL_ID, px_text, emoji_ids=[CE["link"], CE["globe"], CE["info"]])
-    except:
-        pass
     try:
         txt_content = "\n".join(p['proxy_url'] for p in live_proxies)
         txt_file = io.BytesIO(txt_content.encode('utf-8'))
@@ -1464,7 +1452,7 @@ async def log_proxies_to_channel(uid, username, live_proxies, total_parsed):
         await client_instance.send_file(
             LOG_CHANNEL_ID,
             txt_file,
-            caption=f"📦 <b>{bs('Live Proxies Batch')}</b> ━ {len(live_proxies)}/{total_parsed}\n👤 <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)",
+            caption=f"📦 <b>{bs('Live Proxies')}</b> ━ {len(live_proxies)}/{total_parsed}\n👤 <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)\n📡 <b>{bs('Total')}:</b> {len(live_proxies)}",
             parse_mode='html'
         )
     except:
